@@ -1,6 +1,6 @@
 <div align="center">
   
-# 🧪 VLA-Lab
+# 🦾 VLA-Lab
 
 ### The Missing Toolkit for Vision-Language-Action Model Deployment
 
@@ -99,16 +99,15 @@ Explore Zarr-format training/evaluation datasets with intuitive UI.
 ## 🔧 Installation
 
 ```bash
-# Basic installation
 pip install vlalab
+```
 
-# Full installation (with Zarr dataset support)
-pip install "vlalab[full]"
+Or install from source:
 
-# Development installation
+```bash
 git clone https://github.com/VLA-Lab/VLA-Lab.git
 cd VLA-Lab
-pip install -e ".[dev]"
+pip install -e .
 ```
 
 ---
@@ -366,20 +365,12 @@ class GrootInferenceServer:
 
 ## 🤝 Contributing
 
-We welcome contributions! See our [Contributing Guide](CONTRIBUTING.md) for details.
+We welcome contributions! 
 
 ```bash
-# Setup development environment
 git clone https://github.com/VLA-Lab/VLA-Lab.git
 cd VLA-Lab
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Format code
-black src/
-ruff check src/ --fix
+pip install -e .
 ```
 
 ---
