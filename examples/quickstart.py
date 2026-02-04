@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-VLA-Lab 快速入门示例
+VLA-Lab Quick Start Example
 
-最简单的使用方式，类似 SwanLab。
+The simplest way to get started with VLA-Lab.
 """
 
 import vlalab

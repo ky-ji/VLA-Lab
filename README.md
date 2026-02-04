@@ -1,38 +1,138 @@
-# VLA-Lab
+<div align="center">
+  
+# 🧪 VLA-Lab
 
-**A toolbox for tracking and visualizing the real-world deployment process of VLA models.**
+### The Missing Toolkit for Vision-Language-Action Model Deployment
 
-VLA-Lab 提供统一的日志采集接口和可视化工具，帮助研究人员快速 debug VLA 模型在真实世界部署时的问题。
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-orange.svg)](https://pypi.org/project/vlalab/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/VLA-Lab/VLA-Lab/pulls)
 
-## Features
+**Debug • Visualize • Analyze** your VLA deployments in the real world
 
-- **📊 统一日志格式**: 标准化的 Run 目录结构，支持 JSONL + 图像 artifact
-- **🔬 推理回放**: 逐步回放推理过程，支持多相机、3D 轨迹、动作可视化
-- **📈 时延分析**: 深度分析传输延迟、推理延迟、总回路时间
-- **🗂️ 数据集浏览**: 浏览 Zarr 格式的训练/评估数据集
-- **🔌 多框架支持**: 支持 Diffusion Policy 和 NVIDIA GR00T
+[🚀 Quick Start](#-quick-start) · [📖 Documentation](#-documentation) · [🎯 Features](#-features) · [🔧 Installation](#-installation)
 
-## Installation
+</div>
+
+---
+
+## 🎯 Why VLA-Lab?
+
+Deploying VLA models to real robots is **hard**. You face:
+
+- 🕵️ **Black-box inference** — Can't see what the model "sees" or why it fails
+- ⏱️ **Hidden latencies** — Transport delays, inference bottlenecks, control loop timing issues
+- 📊 **No unified logging** — Every framework logs differently, making cross-model comparison painful
+- 🔄 **Tedious debugging** — Replaying failures requires manual log parsing and visualization
+
+**VLA-Lab solves this.** One unified toolkit for all your VLA deployment needs.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              VLA-Lab Architecture                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────────┐    ┌──────────────────────┐    ┌────────────────────┐   │
+│   │   Robot      │    │   Inference Server   │    │    VLA-Lab         │   │
+│   │   Client     │───▶│   (DP / GR00T / ...) │───▶│    RunLogger       │   │
+│   └──────────────┘    └──────────────────────┘    └─────────┬──────────┘   │
+│                                                             │              │
+│                                                             ▼              │
+│                          ┌──────────────────────────────────────────┐      │
+│                          │            Unified Run Storage            │      │
+│                          │   ┌──────────┬────────────┬───────────┐  │      │
+│                          │   │meta.json │ steps.jsonl│ artifacts/│  │      │
+│                          │   └──────────┴────────────┴───────────┘  │      │
+│                          └──────────────────┬───────────────────────┘      │
+│                                             │                              │
+│                                             ▼                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │                        Visualization Suite                           │  │
+│   │  ┌─────────────┐  ┌──────────────────┐  ┌─────────────────────────┐ │  │
+│   │  │  Inference  │  │     Latency      │  │       Dataset           │ │  │
+│   │  │   Viewer    │  │     Analyzer     │  │       Browser           │ │  │
+│   │  └─────────────┘  └──────────────────┘  └─────────────────────────┘ │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## ✨ Features
+
+<table>
+<tr>
+<td width="50%">
+
+### 📊 Unified Logging Format
+Standardized run structure with JSONL + image artifacts. Works across all VLA frameworks.
+
+### 🔬 Inference Replay
+Step-by-step playback with multi-camera views, 3D trajectory visualization, and action overlays.
+
+</td>
+<td width="50%">
+
+### 📈 Deep Latency Analysis  
+Profile transport delays, inference time, control loop frequency. Find your bottlenecks.
+
+### 🗂️ Dataset Browser
+Explore Zarr-format training/evaluation datasets with intuitive UI.
+
+</td>
+</tr>
+</table>
+
+### 🔌 Framework Support
+
+| Framework | Status | Integration |
+|-----------|--------|-------------|
+| **Diffusion Policy** | ✅ Supported | Drop-in logger |
+| **NVIDIA GR00T** | ✅ Supported | Native adapter |
+| **OpenVLA-OFT** | 🚧 Coming Soon | — |
+| **Pi0.5** | 🚧 Coming Soon | — |
+
+---
+
+## 🔧 Installation
 
 ```bash
-# 基础安装
-pip install -e .
+# Basic installation
+pip install vlalab
 
-# 完整安装（含 zarr 数据集支持）
-pip install -e ".[full]"
+# Full installation (with Zarr dataset support)
+pip install "vlalab[full]"
 
-# 开发安装
+# Development installation
+git clone https://github.com/VLA-Lab/VLA-Lab.git
+cd VLA-Lab
 pip install -e ".[dev]"
 ```
 
-## Quick Start
+---
 
-### 1. 简洁 API（推荐，类似 SwanLab）
+## 🚀 Quick Start
+
+### Minimal Example (3 Lines!)
 
 ```python
 import vlalab
 
-# 初始化一个 run
+# Initialize a run
+run = vlalab.init(project="pick_and_place", config={"model": "diffusion_policy"})
+
+# Log during inference
+vlalab.log({"state": obs["state"], "action": action, "images": {"front": obs["image"]}})
+```
+
+### Full Example
+
+```python
+import vlalab
+
+# Initialize with detailed config
 run = vlalab.init(
     project="pick_and_place",
     config={
@@ -42,56 +142,129 @@ run = vlalab.init(
     },
 )
 
-# 访问配置
+# Access config anywhere
 print(f"Action horizon: {run.config.action_horizon}")
 
-# 在推理循环中记录
+# Inference loop
 for step in range(100):
     obs = get_observation()
-    action = model.predict(obs)
     
-    # 记录这一步
+    t_start = time.time()
+    action = model.predict(obs)
+    latency = (time.time() - t_start) * 1000
+    
+    # Log everything in one call
     vlalab.log({
         "state": obs["state"],
         "action": action,
-        "images": {"front": obs["image"]},
+        "images": {"front": obs["front_cam"], "wrist": obs["wrist_cam"]},
         "inference_latency_ms": latency,
     })
+    
+    robot.execute(action)
 
-# 结束（或程序退出时自动调用）
+# Auto-finishes on exit, or call manually
 vlalab.finish()
 ```
 
-### 2. 启动可视化界面
+### Launch Visualization
 
 ```bash
-# 方式 1: 使用 CLI
+# One command to view all your runs
 vlalab view
-
-# 方式 2: 直接运行 Streamlit
-streamlit run src/vlalab/apps/streamlit/app.py
 ```
 
-### 3. 高级 API（RunLogger）
+<details>
+<summary><b>📸 Screenshots (Click to expand)</b></summary>
+
+*Coming soon: Inference Viewer, Latency Analyzer, Dataset Browser screenshots*
+
+</details>
+
+---
+
+## 📖 Documentation
+
+### Core Concepts
+
+**Run** — A single deployment session (one experiment, one episode, one evaluation)
+
+**Step** — A single inference timestep with observations, actions, and timing
+
+**Artifacts** — Images, point clouds, and other media saved alongside logs
+
+### API Reference
+
+<details>
+<summary><b>vlalab.init() — Initialize a run</b></summary>
+
+```python
+run = vlalab.init(
+    project: str = "default",     # Project name (creates subdirectory)
+    name: str = None,             # Run name (auto-generated if None)
+    config: dict = None,          # Config accessible via run.config.key
+    dir: str = "./vlalab_runs",   # Base directory (or $VLALAB_DIR)
+    tags: list = None,            # Optional tags
+    notes: str = None,            # Optional notes
+)
+```
+
+</details>
+
+<details>
+<summary><b>vlalab.log() — Log a step</b></summary>
+
+```python
+vlalab.log({
+    # Robot state
+    "state": [...],                    # Full state vector
+    "pose": [x, y, z, qx, qy, qz, qw], # Position + quaternion
+    "gripper": 0.5,                    # Gripper opening (0-1)
+    
+    # Actions
+    "action": [...],                   # Single action or action chunk
+    
+    # Images (multi-camera support)
+    "images": {
+        "front": np.ndarray,           # HWC numpy array
+        "wrist": np.ndarray,
+    },
+    
+    # Timing (any *_ms field auto-captured)
+    "inference_latency_ms": 32.1,
+    "transport_latency_ms": 5.2,
+    "custom_metric_ms": 10.0,
+})
+```
+
+</details>
+
+<details>
+<summary><b>RunLogger — Advanced API</b></summary>
+
+For fine-grained control over logging:
 
 ```python
 from vlalab import RunLogger
 
-# 初始化 logger
 logger = RunLogger(
-    run_dir="runs/my_experiment",
+    run_dir="runs/experiment_001",
     model_name="diffusion_policy",
-    model_path="/path/to/checkpoint",
+    model_path="/path/to/checkpoint.pt",
     task_name="pick_and_place",
     robot_name="franka",
+    cameras=[
+        {"name": "front", "resolution": [640, 480]},
+        {"name": "wrist", "resolution": [320, 240]},
+    ],
+    inference_freq=10.0,
 )
 
-# 在推理循环中记录每一步
 logger.log_step(
     step_idx=0,
-    state=[0.5, 0.2, 0.3, 0, 0, 0, 1, 1.0],  # pose + gripper
-    action=[[0.51, 0.21, 0.31, 0, 0, 0, 1, 1.0]],  # action chunk
-    images={"front": image_rgb},  # 多相机支持
+    state=[0.5, 0.2, 0.3, 0, 0, 0, 1, 1.0],
+    action=[[0.51, 0.21, 0.31, 0, 0, 0, 1, 1.0]],
+    images={"front": image_rgb},
     timing={
         "client_send": t1,
         "server_recv": t2,
@@ -100,206 +273,127 @@ logger.log_step(
     },
 )
 
-# 结束时关闭
 logger.close()
 ```
 
-### 3. 转换旧版日志
+</details>
+
+### CLI Commands
 
 ```bash
-# 自动检测格式并转换
-vlalab convert /path/to/inference_log_xxx.json -o /path/to/output_run
+# Launch visualization dashboard
+vlalab view [--port 8501]
 
-# 指定格式
-vlalab convert /path/to/log.json -f dp -o /path/to/output
-vlalab convert /path/to/log.json -f groot -o /path/to/output
+# Convert legacy logs (auto-detects format)
+vlalab convert /path/to/old_log.json -o /path/to/output
+
+# Inspect a run
+vlalab info /path/to/run_dir
 ```
 
-## Run Directory Structure
+---
 
-VLA-Lab 使用标准化的 Run 目录结构：
+## 📁 Run Directory Structure
 
 ```
-run_dir/
-├── meta.json           # 元数据（模型、任务、机器人、相机配置等）
-├── steps.jsonl         # 步骤记录（每行一个 JSON）
-└── artifacts/
-    └── images/         # 图像文件
-        ├── step_000000_front.jpg
-        ├── step_000000_ego.jpg
-        └── ...
+vlalab_runs/
+└── pick_and_place/                 # Project
+    └── run_20240115_103000/        # Run
+        ├── meta.json               # Metadata (model, task, robot, cameras)
+        ├── steps.jsonl             # Step records (one JSON per line)
+        └── artifacts/
+            └── images/             # Saved images
+                ├── step_000000_front.jpg
+                ├── step_000000_wrist.jpg
+                └── ...
 ```
 
-### meta.json 示例
+---
 
-```json
-{
-    "run_name": "experiment_001",
-    "start_time": "2024-01-15T10:30:00",
-    "model_name": "diffusion_policy",
-    "model_path": "/path/to/checkpoint",
-    "task_name": "pick_and_place",
-    "robot_name": "franka",
-    "cameras": [
-        {"name": "front", "resolution": [640, 480]},
-        {"name": "ego", "resolution": [320, 240]}
-    ],
-    "inference_freq": 10.0,
-    "total_steps": 150
-}
-```
-
-### steps.jsonl 示例
-
-```json
-{"step_idx": 0, "obs": {"state": [0.5, 0.2, ...], "images": [{"path": "artifacts/images/step_000000_front.jpg", "camera_name": "front"}]}, "action": {"values": [[0.51, 0.21, ...]]}, "timing": {"inference_latency_ms": 45.2, "total_latency_ms": 78.5}}
-```
-
-## Supported Frameworks
+## 🔗 Framework Integration
 
 ### Diffusion Policy
 
-接入方式：在 `inference_server.py` 中初始化 `RunLogger`
-
 ```python
-# 在 DPInferenceServerSSH.__init__ 中
+# In your inference_server.py
 from vlalab import RunLogger
 
-self.logger = RunLogger(
-    run_dir=f"runs/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-    model_name="diffusion_policy",
-    model_path=str(checkpoint_path),
-    model_type="diffusion_policy",
-)
+class DPInferenceServer:
+    def __init__(self, checkpoint_path):
+        self.logger = RunLogger(
+            run_dir=f"runs/{datetime.now():%Y%m%d_%H%M%S}",
+            model_name="diffusion_policy",
+            model_path=str(checkpoint_path),
+        )
+    
+    def infer(self, obs):
+        action = self.model(obs)
+        self.logger.log_step(step_idx=self.step, ...)
+        return action
 ```
 
-### Isaac-GR00T
-
-接入方式：在 `inference_server_groot.py` 中初始化 `RunLogger`
+### NVIDIA GR00T
 
 ```python
-# 在 GrootInferenceServer.__init__ 中
+# In your inference_server_groot.py
 from vlalab import RunLogger
 
-self.logger = RunLogger(
-    run_dir=f"runs/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-    model_name="groot",
-    model_path=str(model_path),
-    model_type="groot",
-    task_prompt=task_prompt,
-)
+class GrootInferenceServer:
+    def __init__(self, model_path, task_prompt):
+        self.logger = RunLogger(
+            run_dir=f"runs/{datetime.now():%Y%m%d_%H%M%S}",
+            model_name="groot",
+            model_path=str(model_path),
+            task_prompt=task_prompt,
+        )
 ```
 
-## CLI Commands
+---
+
+## 🗺️ Roadmap
+
+- [x] Core logging API
+- [x] Streamlit visualization suite
+- [x] Diffusion Policy adapter
+- [x] GR00T adapter
+- [ ] OpenVLA adapter
+- [ ] Cloud sync & team collaboration
+- [ ] Real-time streaming dashboard
+- [ ] Automatic failure detection
+- [ ] Integration with robot simulators
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! See our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ```bash
-# 启动可视化界面
-vlalab view [--port 8501] [--run-dir /path/to/run]
-
-# 转换旧版日志
-vlalab convert <input_path> [-o output_dir] [-f dp|groot|auto]
-
-# 初始化新的 run 目录
-vlalab init-run <run_dir> [-m model] [-t task] [-r robot]
-
-# 查看 run 信息
-vlalab info <run_dir>
-```
-
-## API Reference
-
-### 简洁 API（推荐）
-
-```python
-import vlalab
-
-# 初始化一个 run
-run = vlalab.init(
-    project: str = "default",     # 项目名称
-    name: str = None,             # Run 名称（自动生成）
-    config: dict = None,          # 配置字典，可通过 run.config.key 访问
-    dir: str = "./vlalab_runs",   # 基础目录（或 $VLALAB_DIR）
-    tags: list = None,            # 可选标签
-    notes: str = None,            # 可选备注
-)
-
-# 访问配置
-run.config.model          # 直接属性访问
-run.config["model"]       # 字典式访问
-run.config.get("model")   # 带默认值
-
-# 记录一步
-vlalab.log({
-    "state": [...],                    # 机器人状态
-    "action": [...],                   # 动作（单个或 chunk）
-    "images": {"front": img},          # 图像（numpy 或 base64）
-    "inference_latency_ms": 32.1,      # 任何 *_ms 字段自动识别为时延
-})
-
-# 单独记录图像
-vlalab.log_image("front", image_array)
-
-# 结束（自动调用 atexit）
-vlalab.finish()
-
-# 获取当前 run
-run = vlalab.get_run()
-```
-
-### RunLogger（高级 API）
-
-```python
-from vlalab import RunLogger
-
-logger = RunLogger(
-    run_dir: str,                      # 存储目录
-    model_name: str = "unknown",
-    model_path: Optional[str] = None,
-    model_type: Optional[str] = None,
-    task_name: str = "unknown",
-    task_prompt: Optional[str] = None,
-    robot_name: str = "unknown",
-    cameras: Optional[List[Dict]] = None,
-    inference_freq: Optional[float] = None,
-    image_quality: int = 85,
-)
-
-logger.log_step(
-    step_idx: int,
-    state: Optional[List[float]] = None,
-    action: Optional[Union[List, List[List]]] = None,
-    images: Optional[Dict[str, np.ndarray]] = None,
-    timing: Optional[Dict] = None,
-    prompt: Optional[str] = None,
-)
-
-logger.close()
-```
-
-### Schema Classes
-
-- `StepRecord`: 单步记录
-- `ObsData`: 观测数据（状态 + 图像引用）
-- `ActionData`: 动作数据（支持 chunk）
-- `TimingData`: 时延数据
-- `RunMeta`: 运行元数据
-- `Config`: 配置对象，支持属性访问
-
-## Development
-
-```bash
-# 安装开发依赖
+# Setup development environment
+git clone https://github.com/VLA-Lab/VLA-Lab.git
+cd VLA-Lab
 pip install -e ".[dev]"
 
-# 运行测试
+# Run tests
 pytest
 
-# 代码格式化
+# Format code
 black src/
-ruff check src/
+ruff check src/ --fix
 ```
 
-## License
+---
 
-MIT License
+## 📄 License
 
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+  
+**⭐ Star us on GitHub if VLA-Lab helps your research!**
+
+*Built with ❤️ for the robotics community*
+
+</div>

@@ -1,7 +1,9 @@
 """
-VLA-Lab: A toolbox for tracking and visualizing the real-world deployment process of VLA models.
+VLA-Lab: The missing toolkit for VLA model deployment.
 
-Simple API (SwanLab-style):
+Debug, visualize, and analyze your VLA deployments in the real world.
+
+Quick Start:
     import vlalab
 
     # Initialize a run
@@ -38,7 +40,7 @@ Advanced API:
 
 __version__ = "0.1.0"
 
-# Simple API (SwanLab-style)
+# Simple API
 from vlalab.core import (
     init,
     log,

@@ -1,7 +1,7 @@
 """
 VLA-Lab Core API
 
-SwanLab-style simple API for VLA deployment logging.
+Simple, intuitive API for VLA deployment logging and debugging.
 
 Usage:
     import vlalab
@@ -38,9 +38,9 @@ import numpy as np
 
 def _find_project_root(start_path: Optional[Path] = None, max_depth: int = 10) -> Optional[Path]:
     """
-    自动检测项目根目录（效仿 SwanLab 的做法）
+    Auto-detect project root directory.
     
-    从调用 vlalab.init() 的位置向上查找项目根目录，查找标志文件：
+    Searches upward from the vlalab.init() call site for project markers:
     - .git/ (Git 仓库)
     - setup.py (Python 包)
     - pyproject.toml (现代 Python 项目)
@@ -135,7 +135,7 @@ class Config:
     """
     Configuration object that allows attribute-style access.
     
-    Similar to SwanLab's run.config
+    Supports both dict-style (config["key"]) and attribute-style (config.key) access.
     """
     
     def __init__(self, config_dict: Optional[Dict[str, Any]] = None):
@@ -234,7 +234,7 @@ class Run:
         elif "VLALAB_DIR" in os.environ:
             base_dir = os.environ.get("VLALAB_DIR")
         else:
-            # 自动检测项目根目录（效仿 SwanLab 的做法）
+            # Auto-detect project root directory
             project_root = _find_project_root()
             if project_root:
                 # 在项目根目录下创建 vlalab_runs/ 目录
@@ -423,7 +423,7 @@ def init(
     """
     Initialize a new VLA-Lab run.
     
-    This is the main entry point for VLA-Lab, similar to swanlab.init().
+    This is the main entry point for VLA-Lab.
     
     Args:
         project: Project name (creates subdirectory)

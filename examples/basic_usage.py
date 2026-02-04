@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-VLA-Lab 基本使用示例
+VLA-Lab Basic Usage Examples
 
-展示两种 API 的使用方式：
-1. 简洁 API（类似 SwanLab，推荐）
-2. 高级 API（RunLogger，更细粒度控制）
+Demonstrates two API styles:
+1. Simple API (recommended for most users)
+2. Advanced API (RunLogger, for fine-grained control)
 """
 
 import numpy as np
@@ -27,7 +27,7 @@ def simulate_inference():
 
 
 # ============================================================================
-# 方式 1: 简洁 API（推荐，类似 SwanLab）
+# Method 1: Simple API (Recommended)
 # ============================================================================
 
 def example_simple_api():
@@ -45,7 +45,7 @@ def example_simple_api():
         },
     )
     
-    # 访问配置（类似 SwanLab 的 run.config.xxx）
+    # Access config via run.config.xxx
     print(f"模型: {run.config.model}")
     print(f"Action Horizon: {run.config.action_horizon}")
     
