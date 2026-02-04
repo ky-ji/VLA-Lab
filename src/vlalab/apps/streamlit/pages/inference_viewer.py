@@ -90,6 +90,23 @@ class InferenceRunViewer:
         if images:
             return self.load_image_from_ref(images[0])
         return None
+
+    def get_step_images(self, step_idx: int) -> Dict[str, np.ndarray]:
+        """Get all camera images for a step as {camera_name: image_rgb}."""
+        if step_idx >= len(self.steps):
+            return {}
+        step = self.steps[step_idx]
+        obs = step.get("obs", {})
+        images = obs.get("images", [])
+        out: Dict[str, np.ndarray] = {}
+        for ref in images or []:
+            if not isinstance(ref, dict):
+                continue
+            cam = ref.get("camera_name", "default")
+            img = self.load_image_from_ref(ref)
+            if img is not None:
+                out[str(cam)] = img
+        return out
     
     def get_step_state(self, step_idx: int) -> np.ndarray:
         """Get state for a step."""
@@ -125,7 +142,7 @@ class InferenceRunViewer:
         step = self.steps[step_idx]
         current_state = self.get_step_state(step_idx)
         pred_action = self.get_step_action(step_idx)
-        img = self.get_step_image(step_idx)
+        imgs = self.get_step_images(step_idx)
         timing = step.get("timing", {})
         
         # Layout
@@ -133,8 +150,19 @@ class InferenceRunViewer:
         
         with c1:
             st.markdown("#### 👁️ 模型视觉观测")
-            if img is not None:
-                st.image(img, caption=f"Step {step_idx} (Shape: {img.shape})", use_container_width=True)
+            if imgs:
+                # Display in a grid (up to 3 columns) to support multi-camera runs
+                cam_names = list(imgs.keys())
+                n_cols = min(3, max(1, len(cam_names)))
+                cols = st.columns(n_cols)
+                for i, cam in enumerate(cam_names):
+                    with cols[i % n_cols]:
+                        img = imgs[cam]
+                        st.image(
+                            img,
+                            caption=f"{cam} | Step {step_idx} | {img.shape}",
+                            use_container_width=True,
+                        )
             else:
                 st.warning("无图像数据")
             
