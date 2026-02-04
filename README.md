@@ -85,14 +85,6 @@ Explore Zarr-format training/evaluation datasets with intuitive UI.
 </tr>
 </table>
 
-### 🔌 Framework Support
-
-| Framework | Status | Integration |
-|-----------|--------|-------------|
-| **Diffusion Policy** | ✅ Supported | Drop-in logger |
-| **NVIDIA GR00T** | ✅ Supported | Native adapter |
-| **OpenVLA-OFT** | 🚧 Coming Soon | — |
-| **Pi0.5** | 🚧 Coming Soon | — |
 
 ---
 
@@ -159,7 +151,7 @@ for step in range(100):
         "images": {"front": obs["front_cam"], "wrist": obs["wrist_cam"]},
         "inference_latency_ms": latency,
     })
-    
+
     robot.execute(action)
 
 # Auto-finishes on exit, or call manually
@@ -300,51 +292,11 @@ vlalab_runs/
     └── run_20240115_103000/        # Run
         ├── meta.json               # Metadata (model, task, robot, cameras)
         ├── steps.jsonl             # Step records (one JSON per line)
-        └── artifacts/
+└── artifacts/
             └── images/             # Saved images
-                ├── step_000000_front.jpg
+        ├── step_000000_front.jpg
                 ├── step_000000_wrist.jpg
-                └── ...
-```
-
----
-
-## 🔗 Framework Integration
-
-### Diffusion Policy
-
-```python
-# In your inference_server.py
-from vlalab import RunLogger
-
-class DPInferenceServer:
-    def __init__(self, checkpoint_path):
-        self.logger = RunLogger(
-            run_dir=f"runs/{datetime.now():%Y%m%d_%H%M%S}",
-            model_name="diffusion_policy",
-            model_path=str(checkpoint_path),
-        )
-    
-    def infer(self, obs):
-        action = self.model(obs)
-        self.logger.log_step(step_idx=self.step, ...)
-        return action
-```
-
-### NVIDIA GR00T
-
-```python
-# In your inference_server_groot.py
-from vlalab import RunLogger
-
-class GrootInferenceServer:
-    def __init__(self, model_path, task_prompt):
-        self.logger = RunLogger(
-            run_dir=f"runs/{datetime.now():%Y%m%d_%H%M%S}",
-            model_name="groot",
-            model_path=str(model_path),
-            task_prompt=task_prompt,
-        )
+        └── ...
 ```
 
 ---
