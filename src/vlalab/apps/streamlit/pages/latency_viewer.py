@@ -9,7 +9,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
+
+import vlalab
 
 # Setup matplotlib fonts
 try:
@@ -22,21 +24,14 @@ except Exception:
 def load_timing_data(run_path: Path) -> List[Dict[str, Any]]:
     """Load timing data from a run."""
     timing_data = []
+    steps_path = run_path / "steps.jsonl"
     
-    # Check if it's a directory (VLA-Lab format) or JSON file (legacy)
-    if run_path.is_dir():
-        steps_path = run_path / "steps.jsonl"
-        if steps_path.exists():
-            with open(steps_path, "r") as f:
-                for line in f:
-                    if line.strip():
-                        step = json.loads(line)
-                        timing_data.append(step.get("timing", {}))
-    elif run_path.suffix == ".json":
-        with open(run_path, "r") as f:
-            data = json.load(f)
-            for step in data.get("steps", []):
-                timing_data.append(step.get("timing", {}))
+    if steps_path.exists():
+        with open(steps_path, "r") as f:
+            for line in f:
+                if line.strip():
+                    step = json.loads(line)
+                    timing_data.append(step.get("timing", {}))
     
     return timing_data
 
@@ -55,37 +50,32 @@ def render():
     """Render the latency analysis page."""
     st.title("📈 时延深度分析")
     
-    # Run selection
-    st.sidebar.markdown("### 选择运行")
+    # Sidebar: show current runs directory
+    runs_dir = vlalab.get_runs_dir()
+    st.sidebar.markdown("### 日志目录")
+    st.sidebar.code(str(runs_dir))
     
-    default_paths = [
-        "/home/jikangye/workspace/baselines/vla-baselines/RealWorld-DP/realworld_deploy/server/log",
-        "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/log",
-    ]
+    # List projects
+    projects = vlalab.list_projects()
     
-    custom_path = st.sidebar.text_input("自定义日志路径", "")
+    if not projects:
+        st.info(f"未找到任何项目。日志目录: `{runs_dir}`")
+        return
     
-    search_paths = default_paths.copy()
-    if custom_path:
-        search_paths.insert(0, custom_path)
+    # Project filter
+    selected_project = st.sidebar.selectbox(
+        "选择项目",
+        ["全部"] + projects,
+    )
     
-    # Find runs
-    run_paths = []
-    for base_dir in search_paths:
-        base_path = Path(base_dir)
-        if not base_path.exists():
-            continue
-        
-        for item in base_path.iterdir():
-            if item.is_dir() and ((item / "meta.json").exists() or (item / "steps.jsonl").exists()):
-                run_paths.append(item)
-            elif item.suffix == ".json" and "inference_log" in item.name:
-                run_paths.append(item)
-    
-    run_paths = sorted(run_paths, key=lambda p: p.stat().st_mtime, reverse=True)
+    # List runs
+    if selected_project == "全部":
+        run_paths = vlalab.list_runs()
+    else:
+        run_paths = vlalab.list_runs(project=selected_project)
     
     if not run_paths:
-        st.info("未找到运行记录")
+        st.info("该项目下没有运行记录。")
         return
     
     # Multi-select for comparison
@@ -93,7 +83,7 @@ def render():
         "选择运行 (可多选比较)",
         run_paths,
         default=[run_paths[0]] if run_paths else [],
-        format_func=lambda p: f"{p.name}"
+        format_func=lambda p: f"{p.name} ({p.parent.name})"
     )
     
     if not selected_runs:

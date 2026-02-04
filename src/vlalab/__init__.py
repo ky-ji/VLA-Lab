@@ -39,7 +39,19 @@ Advanced API:
 __version__ = "0.1.0"
 
 # Simple API (SwanLab-style)
-from vlalab.core import init, log, log_image, finish, get_run, Run, Config
+from vlalab.core import (
+    init,
+    log,
+    log_image,
+    finish,
+    get_run,
+    Run,
+    Config,
+    # Run discovery (uses same dir as init)
+    get_runs_dir,
+    list_projects,
+    list_runs,
+)
 
 # Advanced API
 from vlalab.logging import RunLogger
@@ -56,6 +68,10 @@ __all__ = [
     "get_run",
     "Run",
     "Config",
+    # Run discovery
+    "get_runs_dir",
+    "list_projects",
+    "list_runs",
     # Advanced API
     "RunLogger",
     "StepRecord",

@@ -7,12 +7,13 @@ Step-by-step replay of inference sessions with multi-camera support.
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 from pathlib import Path
 import json
 import base64
 import cv2
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
+
+import vlalab
 
 # Setup matplotlib fonts
 try:
@@ -23,86 +24,48 @@ except Exception:
 
 
 class InferenceRunViewer:
-    """Viewer for VLA-Lab inference runs and legacy logs."""
+    """Viewer for VLA-Lab inference runs."""
     
     def __init__(self, run_path: str):
         self.run_path = Path(run_path)
         self.valid = False
-        self.is_legacy = False
         self.steps = []
         self.meta = {}
         self._load_data()
     
     def _load_data(self):
-        """Load run data from either VLA-Lab format or legacy format."""
+        """Load run data."""
         try:
-            # Check if it's a VLA-Lab run directory
-            if self.run_path.is_dir():
-                self._load_vlalab_run()
-            # Check if it's a legacy JSON log file
-            elif self.run_path.suffix == ".json":
-                self._load_legacy_log()
-            else:
-                st.error(f"不支持的文件格式: {self.run_path}")
-                return
+            meta_path = self.run_path / "meta.json"
+            steps_path = self.run_path / "steps.jsonl"
+            
+            if meta_path.exists():
+                with open(meta_path, "r") as f:
+                    self.meta = json.load(f)
+            
+            if steps_path.exists():
+                self.steps = []
+                with open(steps_path, "r") as f:
+                    for line in f:
+                        if line.strip():
+                            self.steps.append(json.loads(line))
             
             self.valid = True
         except Exception as e:
             st.error(f"加载失败: {e}")
             self.valid = False
     
-    def _load_vlalab_run(self):
-        """Load VLA-Lab run directory format."""
-        meta_path = self.run_path / "meta.json"
-        steps_path = self.run_path / "steps.jsonl"
-        
-        if meta_path.exists():
-            with open(meta_path, "r") as f:
-                self.meta = json.load(f)
-        
-        if steps_path.exists():
-            self.steps = []
-            with open(steps_path, "r") as f:
-                for line in f:
-                    if line.strip():
-                        self.steps.append(json.loads(line))
-        
-        self.is_legacy = False
-    
-    def _load_legacy_log(self):
-        """Load legacy inference log JSON format."""
-        with open(self.run_path, "r") as f:
-            data = json.load(f)
-        
-        self.meta = data.get("meta", {})
-        self.steps = data.get("steps", [])
-        self.is_legacy = True
-    
     def _get_latency_ms(self, timing_dict: Dict, key_base: str) -> float:
-        """Get latency value in ms (compatible with old/new format)."""
+        """Get latency value in ms."""
         new_key = f"{key_base}_ms"
         if new_key in timing_dict and timing_dict[new_key] is not None:
             return timing_dict[new_key]
-        
         if key_base in timing_dict and timing_dict[key_base] is not None:
             return timing_dict[key_base] * 1000
-        
         return 0.0
     
-    def decode_image(self, b64_str: str) -> Optional[np.ndarray]:
-        """Decode base64 image."""
-        if not b64_str:
-            return None
-        try:
-            img_data = base64.b64decode(b64_str)
-            img_array = np.frombuffer(img_data, dtype=np.uint8)
-            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        except Exception:
-            return None
-    
     def load_image_from_ref(self, image_ref: Dict) -> Optional[np.ndarray]:
-        """Load image from VLA-Lab image reference."""
+        """Load image from image reference."""
         if not image_ref:
             return None
         
@@ -117,24 +80,15 @@ class InferenceRunViewer:
         return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     
     def get_step_image(self, step_idx: int) -> Optional[np.ndarray]:
-        """Get image for a step (handles both formats)."""
+        """Get image for a step."""
         if step_idx >= len(self.steps):
             return None
         
         step = self.steps[step_idx]
-        
-        if self.is_legacy:
-            # Legacy format: image_base64 in input
-            input_data = step.get("input", {})
-            b64_str = input_data.get("image_base64")
-            return self.decode_image(b64_str)
-        else:
-            # VLA-Lab format: image refs in obs
-            obs = step.get("obs", {})
-            images = obs.get("images", [])
-            if images:
-                return self.load_image_from_ref(images[0])
-        
+        obs = step.get("obs", {})
+        images = obs.get("images", [])
+        if images:
+            return self.load_image_from_ref(images[0])
         return None
     
     def get_step_state(self, step_idx: int) -> np.ndarray:
@@ -143,14 +97,8 @@ class InferenceRunViewer:
             return np.array([])
         
         step = self.steps[step_idx]
-        
-        if self.is_legacy:
-            input_data = step.get("input", {})
-            state = input_data.get("state", input_data.get("state8", []))
-        else:
-            obs = step.get("obs", {})
-            state = obs.get("state", [])
-        
+        obs = step.get("obs", {})
+        state = obs.get("state", [])
         return np.array(state) if state else np.array([])
     
     def get_step_action(self, step_idx: int) -> np.ndarray:
@@ -160,8 +108,7 @@ class InferenceRunViewer:
         
         step = self.steps[step_idx]
         action_data = step.get("action", {})
-        
-        values = action_data.get("values", action_data.get("action8", []))
+        values = action_data.get("values", [])
         return np.array(values) if values else np.array([])
     
     def get_all_states(self) -> np.ndarray:
@@ -255,7 +202,6 @@ class InferenceRunViewer:
             st.warning("当前日志不包含步骤数据")
             return
         
-        # Extract timing data
         steps_range = range(len(self.steps))
         trans_lats = []
         infer_lats = []
@@ -281,8 +227,6 @@ class InferenceRunViewer:
         ax.set_ylabel("Latency (ms)")
         ax.legend()
         ax.grid(True, alpha=0.3)
-        
-        # Alert threshold
         ax.axhline(100, color='r', linestyle='--', alpha=0.5)
         ax.text(0, 105, '100ms Alert', color='r', fontsize=8)
         
@@ -305,53 +249,43 @@ class InferenceRunViewer:
             col4.metric("最大总延迟", f"{np.max(valid_total):.1f} ms")
 
 
-def find_run_paths(base_dirs: List[str]) -> List[Path]:
-    """Find all run directories and legacy log files."""
-    paths = []
-    
-    for base_dir in base_dirs:
-        base_path = Path(base_dir)
-        if not base_path.exists():
-            continue
-        
-        # Find VLA-Lab run directories (have meta.json or steps.jsonl)
-        for item in base_path.iterdir():
-            if item.is_dir():
-                if (item / "meta.json").exists() or (item / "steps.jsonl").exists():
-                    paths.append(item)
-        
-        # Find legacy JSON logs
-        for json_file in base_path.glob("inference_log*.json"):
-            paths.append(json_file)
-    
-    return sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
-
-
 def render():
     """Render the inference viewer page."""
     st.title("🔬 推理运行回放")
     
-    # Sidebar for run selection
-    st.sidebar.markdown("### 选择运行")
+    # Sidebar: show current runs directory
+    runs_dir = vlalab.get_runs_dir()
+    st.sidebar.markdown("### 日志目录")
+    st.sidebar.code(str(runs_dir))
     
-    # Default search paths
-    default_paths = [
-        "/home/jikangye/workspace/baselines/vla-baselines/RealWorld-DP/realworld_deploy/server/log",
-        "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/log",
-    ]
+    # List projects
+    projects = vlalab.list_projects()
     
-    # Custom path input
-    custom_path = st.sidebar.text_input("自定义日志路径", "")
+    if not projects:
+        st.info(f"未找到任何项目。请先使用 `vlalab.init()` 创建运行记录。\n\n日志目录: `{runs_dir}`")
+        st.markdown("""
+        **提示**: 设置 `$VLALAB_DIR` 环境变量可更改日志存储位置。
+        
+        ```bash
+        export VLALAB_DIR=/path/to/your/logs
+        ```
+        """)
+        return
     
-    search_paths = default_paths.copy()
-    if custom_path:
-        search_paths.insert(0, custom_path)
+    # Project filter
+    selected_project = st.sidebar.selectbox(
+        "选择项目",
+        ["全部"] + projects,
+    )
     
-    # Find runs
-    run_paths = find_run_paths(search_paths)
+    # List runs
+    if selected_project == "全部":
+        run_paths = vlalab.list_runs()
+    else:
+        run_paths = vlalab.list_runs(project=selected_project)
     
     if not run_paths:
-        st.info("未找到运行记录。请输入日志目录路径。")
+        st.info("该项目下没有运行记录。")
         return
     
     # Select run
@@ -379,7 +313,7 @@ def render():
     st.sidebar.markdown("### 运行信息")
     st.sidebar.info(f"步数: {len(viewer.steps)}")
     if viewer.meta:
-        model = viewer.meta.get("model_name", viewer.meta.get("checkpoint", "unknown"))
+        model = viewer.meta.get("model_name", "unknown")
         if isinstance(model, str) and len(model) > 30:
             model = "..." + model[-30:]
         st.sidebar.info(f"模型: {model}")

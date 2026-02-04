@@ -446,3 +446,102 @@ def _auto_finish():
 def get_run() -> Optional[Run]:
     """Get the current active run, or None if no run is active."""
     return _current_run
+
+
+# ============================================================================
+# Run Discovery - 和 init() 共享同一套目录配置
+# ============================================================================
+
+def get_runs_dir(dir: Optional[str] = None) -> Path:
+    """
+    Get the runs directory.
+    
+    This uses the same logic as init() to ensure consistency between
+    logging and discovering runs.
+    
+    Args:
+        dir: Override directory (default: $VLALAB_DIR or ./vlalab_runs)
+    
+    Returns:
+        Path to the runs directory
+    """
+    base_dir = dir or os.environ.get("VLALAB_DIR", "./vlalab_runs")
+    return Path(base_dir)
+
+
+def list_projects(dir: Optional[str] = None) -> List[str]:
+    """
+    List all projects in the runs directory.
+    
+    Args:
+        dir: Override directory (default: $VLALAB_DIR or ./vlalab_runs)
+    
+    Returns:
+        List of project names
+    """
+    runs_dir = get_runs_dir(dir)
+    if not runs_dir.exists():
+        return []
+    
+    projects = []
+    for item in runs_dir.iterdir():
+        if item.is_dir() and not item.name.startswith("."):
+            projects.append(item.name)
+    
+    return sorted(projects)
+
+
+def list_runs(
+    project: Optional[str] = None,
+    dir: Optional[str] = None,
+) -> List[Path]:
+    """
+    List all runs, optionally filtered by project.
+    
+    Uses the same directory as init() to ensure consistency.
+    
+    Args:
+        project: Filter by project name (None for all projects)
+        dir: Override directory (default: $VLALAB_DIR or ./vlalab_runs)
+    
+    Returns:
+        List of run paths, sorted by modification time (newest first)
+    
+    Example:
+        import vlalab
+        
+        # List all runs
+        runs = vlalab.list_runs()
+        
+        # List runs in a specific project
+        runs = vlalab.list_runs(project="pick_and_place")
+        
+        for run_path in runs:
+            print(run_path.name)
+    """
+    runs_dir = get_runs_dir(dir)
+    if not runs_dir.exists():
+        return []
+    
+    runs = []
+    
+    def is_run_dir(path: Path) -> bool:
+        return (path / "meta.json").exists() or (path / "steps.jsonl").exists()
+    
+    if project:
+        # List runs in a specific project
+        project_dir = runs_dir / project
+        if project_dir.exists() and project_dir.is_dir():
+            for item in project_dir.iterdir():
+                if item.is_dir() and is_run_dir(item):
+                    runs.append(item)
+    else:
+        # List all runs across all projects
+        for project_item in runs_dir.iterdir():
+            if project_item.is_dir() and not project_item.name.startswith("."):
+                for run_item in project_item.iterdir():
+                    if run_item.is_dir() and is_run_dir(run_item):
+                        runs.append(run_item)
+    
+    # Sort by modification time (newest first)
+    return sorted(runs, key=lambda p: p.stat().st_mtime, reverse=True)
