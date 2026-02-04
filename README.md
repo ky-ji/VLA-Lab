@@ -27,7 +27,42 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-### 1. 启动可视化界面
+### 1. 简洁 API（推荐，类似 SwanLab）
+
+```python
+import vlalab
+
+# 初始化一个 run
+run = vlalab.init(
+    project="pick_and_place",
+    config={
+        "model": "diffusion_policy",
+        "action_horizon": 8,
+        "inference_freq": 10,
+    },
+)
+
+# 访问配置
+print(f"Action horizon: {run.config.action_horizon}")
+
+# 在推理循环中记录
+for step in range(100):
+    obs = get_observation()
+    action = model.predict(obs)
+    
+    # 记录这一步
+    vlalab.log({
+        "state": obs["state"],
+        "action": action,
+        "images": {"front": obs["image"]},
+        "inference_latency_ms": latency,
+    })
+
+# 结束（或程序退出时自动调用）
+vlalab.finish()
+```
+
+### 2. 启动可视化界面
 
 ```bash
 # 方式 1: 使用 CLI
@@ -37,7 +72,7 @@ vlalab view
 streamlit run src/vlalab/apps/streamlit/app.py
 ```
 
-### 2. 在推理服务器中接入 VLA-Lab
+### 3. 高级 API（RunLogger）
 
 ```python
 from vlalab import RunLogger
@@ -173,35 +208,72 @@ vlalab info <run_dir>
 
 ## API Reference
 
-### RunLogger
+### 简洁 API（推荐）
 
 ```python
-class RunLogger:
-    def __init__(
-        self,
-        run_dir: str,
-        model_name: str = "unknown",
-        model_path: Optional[str] = None,
-        model_type: Optional[str] = None,
-        task_name: str = "unknown",
-        task_prompt: Optional[str] = None,
-        robot_name: str = "unknown",
-        cameras: Optional[List[Dict]] = None,
-        inference_freq: Optional[float] = None,
-        image_quality: int = 85,
-    ): ...
-    
-    def log_step(
-        self,
-        step_idx: int,
-        state: Optional[List[float]] = None,
-        action: Optional[Union[List, List[List]]] = None,
-        images: Optional[Dict[str, np.ndarray]] = None,
-        timing: Optional[Dict] = None,
-        prompt: Optional[str] = None,
-    ): ...
-    
-    def close(self): ...
+import vlalab
+
+# 初始化一个 run
+run = vlalab.init(
+    project: str = "default",     # 项目名称
+    name: str = None,             # Run 名称（自动生成）
+    config: dict = None,          # 配置字典，可通过 run.config.key 访问
+    dir: str = "./vlalab_runs",   # 基础目录（或 $VLALAB_DIR）
+    tags: list = None,            # 可选标签
+    notes: str = None,            # 可选备注
+)
+
+# 访问配置
+run.config.model          # 直接属性访问
+run.config["model"]       # 字典式访问
+run.config.get("model")   # 带默认值
+
+# 记录一步
+vlalab.log({
+    "state": [...],                    # 机器人状态
+    "action": [...],                   # 动作（单个或 chunk）
+    "images": {"front": img},          # 图像（numpy 或 base64）
+    "inference_latency_ms": 32.1,      # 任何 *_ms 字段自动识别为时延
+})
+
+# 单独记录图像
+vlalab.log_image("front", image_array)
+
+# 结束（自动调用 atexit）
+vlalab.finish()
+
+# 获取当前 run
+run = vlalab.get_run()
+```
+
+### RunLogger（高级 API）
+
+```python
+from vlalab import RunLogger
+
+logger = RunLogger(
+    run_dir: str,                      # 存储目录
+    model_name: str = "unknown",
+    model_path: Optional[str] = None,
+    model_type: Optional[str] = None,
+    task_name: str = "unknown",
+    task_prompt: Optional[str] = None,
+    robot_name: str = "unknown",
+    cameras: Optional[List[Dict]] = None,
+    inference_freq: Optional[float] = None,
+    image_quality: int = 85,
+)
+
+logger.log_step(
+    step_idx: int,
+    state: Optional[List[float]] = None,
+    action: Optional[Union[List, List[List]]] = None,
+    images: Optional[Dict[str, np.ndarray]] = None,
+    timing: Optional[Dict] = None,
+    prompt: Optional[str] = None,
+)
+
+logger.close()
 ```
 
 ### Schema Classes
@@ -211,6 +283,7 @@ class RunLogger:
 - `ActionData`: 动作数据（支持 chunk）
 - `TimingData`: 时延数据
 - `RunMeta`: 运行元数据
+- `Config`: 配置对象，支持属性访问
 
 ## Development
 
