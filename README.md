@@ -10,7 +10,7 @@ VLA-Lab 提供统一的日志采集接口和可视化工具，帮助研究人员
 - **🔬 推理回放**: 逐步回放推理过程，支持多相机、3D 轨迹、动作可视化
 - **📈 时延分析**: 深度分析传输延迟、推理延迟、总回路时间
 - **🗂️ 数据集浏览**: 浏览 Zarr 格式的训练/评估数据集
-- **🔌 多框架支持**: 支持 Diffusion Policy (RealWorld-DP) 和 Isaac-GR00T
+- **🔌 多框架支持**: 支持 Diffusion Policy 和 NVIDIA GR00T
 
 ## Installation
 
@@ -122,7 +122,7 @@ run_dir/
 
 ## Supported Frameworks
 
-### RealWorld-DP (Diffusion Policy)
+### Diffusion Policy
 
 接入方式：在 `inference_server.py` 中初始化 `RunLogger`
 
