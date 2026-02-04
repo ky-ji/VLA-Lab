@@ -59,6 +59,9 @@ from vlalab.core import (
 from vlalab.logging import RunLogger
 from vlalab.schema import StepRecord, RunMeta, ImageRef
 
+# Evaluation API
+from vlalab.eval import EvalPolicy, ModalityConfig, OpenLoopEvaluator
+
 __all__ = [
     # Version
     "__version__",
@@ -79,4 +82,8 @@ __all__ = [
     "StepRecord",
     "RunMeta",
     "ImageRef",
+    # Evaluation API
+    "EvalPolicy",
+    "ModalityConfig",
+    "OpenLoopEvaluator",
 ]

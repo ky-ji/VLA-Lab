@@ -34,6 +34,7 @@ def main():
         "🔬 Inference Runs": "inference",
         "📊 Dataset Viewer": "dataset",
         "📈 Latency Analysis": "latency",
+        "🎯 Open-Loop Eval": "eval",
     }
     
     selection = st.sidebar.radio("Navigate", list(pages.keys()))
@@ -51,6 +52,9 @@ def main():
     elif page_name == "latency":
         from vlalab.apps.streamlit.pages import latency_viewer
         latency_viewer.render()
+    elif page_name == "eval":
+        from vlalab.apps.streamlit.pages import eval_viewer
+        eval_viewer.render()
     
     # Footer
     st.sidebar.markdown("---")
@@ -78,6 +82,11 @@ def show_home_page():
       - Transport latency (network)
       - Inference latency (GPU)
       - End-to-end loop time
+    
+    - **🎯 Open-Loop Eval**: Evaluate model predictions vs ground truth
+      - Compare predicted actions with dataset actions
+      - MSE/MAE metrics per trajectory
+      - Multi-dimensional action visualization
     
     ### Supported Frameworks
     
