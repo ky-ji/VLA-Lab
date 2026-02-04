@@ -29,10 +29,73 @@ Usage:
 
 import os
 import atexit
+import inspect
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, Union, List
 import numpy as np
+
+
+def _find_project_root(start_path: Optional[Path] = None, max_depth: int = 10) -> Optional[Path]:
+    """
+    自动检测项目根目录（效仿 SwanLab 的做法）
+    
+    从调用 vlalab.init() 的位置向上查找项目根目录，查找标志文件：
+    - .git/ (Git 仓库)
+    - setup.py (Python 包)
+    - pyproject.toml (现代 Python 项目)
+    - README.md (项目文档)
+    
+    Args:
+        start_path: 起始路径（如果为 None，则从调用者文件位置开始）
+        max_depth: 最大向上查找深度
+    
+    Returns:
+        项目根目录路径，如果未找到则返回 None
+    """
+    if start_path is None:
+        # 获取调用者的文件路径
+        frame = inspect.currentframe()
+        try:
+            # 向上查找调用栈，找到第一个不在 vlalab 包内的调用者
+            while frame:
+                frame = frame.f_back
+                if frame is None:
+                    break
+                filename = frame.f_code.co_filename
+                if 'vlalab' not in filename and filename != '<stdin>':
+                    start_path = Path(filename).parent.resolve()
+                    break
+        finally:
+            del frame
+    
+    if start_path is None:
+        # 如果无法获取调用者路径，使用当前工作目录
+        start_path = Path.cwd()
+    
+    # 确保是绝对路径
+    current = Path(start_path).resolve()
+    
+    # 项目根目录的标志文件
+    markers = ['.git', 'setup.py', 'pyproject.toml', 'README.md']
+    
+    depth = 0
+    while depth < max_depth:
+        # 检查当前目录是否包含项目标志
+        for marker in markers:
+            marker_path = current / marker
+            if marker_path.exists():
+                return current
+        
+        # 向上查找
+        parent = current.parent
+        if parent == current:  # 到达文件系统根目录
+            break
+        current = parent
+        depth += 1
+    
+    # 如果没找到，返回调用者文件所在目录的父目录（通常是项目根目录）
+    return start_path.parent if start_path else None
 
 
 class Config:
@@ -132,7 +195,21 @@ class Run:
             return
         
         # Setup run directory
-        base_dir = dir or os.environ.get("VLALAB_DIR", "./vlalab_runs")
+        # 优先级：1. 显式指定的 dir 参数  2. VLALAB_DIR 环境变量  3. 自动检测项目根目录
+        if dir is not None:
+            base_dir = dir
+        elif "VLALAB_DIR" in os.environ:
+            base_dir = os.environ.get("VLALAB_DIR")
+        else:
+            # 自动检测项目根目录（效仿 SwanLab 的做法）
+            project_root = _find_project_root()
+            if project_root:
+                # 在项目根目录下创建 vlalab_runs/ 目录
+                base_dir = project_root / "vlalab_runs"
+            else:
+                # 如果无法检测，使用当前工作目录
+                base_dir = Path.cwd() / "vlalab_runs"
+        
         self.run_dir = Path(base_dir) / project / name
         
         # Extract model/task info from config if available
@@ -456,16 +533,28 @@ def get_runs_dir(dir: Optional[str] = None) -> Path:
     """
     Get the runs directory.
     
-    This uses the same logic as init() to ensure consistency between
-    logging and discovering runs.
+    For visualization tools, this detects the project root from the current
+    working directory (where the user runs the command).
     
     Args:
-        dir: Override directory (default: $VLALAB_DIR or ./vlalab_runs)
+        dir: Override directory (default: auto-detect project root or $VLALAB_DIR or ./vlalab_runs)
     
     Returns:
         Path to the runs directory
     """
-    base_dir = dir or os.environ.get("VLALAB_DIR", "./vlalab_runs")
+    if dir is not None:
+        base_dir = dir
+    elif "VLALAB_DIR" in os.environ:
+        base_dir = os.environ.get("VLALAB_DIR")
+    else:
+        # 对于可视化/查询工具，从当前工作目录检测项目根目录
+        # （用户运行 streamlit 或其他可视化命令的目录）
+        project_root = _find_project_root(start_path=Path.cwd())
+        if project_root:
+            base_dir = project_root / "vlalab_runs"
+        else:
+            base_dir = Path.cwd() / "vlalab_runs"
+    
     return Path(base_dir)
 
 
