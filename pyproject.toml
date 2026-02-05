@@ -33,6 +33,7 @@ dependencies = [
     "opencv-python>=4.5.0",
     "click>=8.0.0",
     "rich>=12.0.0",
+    "plotly>=5.10.0",
 ]
 
 [project.optional-dependencies]
