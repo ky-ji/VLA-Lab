@@ -44,7 +44,7 @@ def view(port: int, run_dir: str):
         package_dir = Path(vlalab.__file__).parent
         app_path = package_dir / "apps" / "streamlit" / "app.py"
     
-    cmd = [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)]
+    cmd = [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port), "--server.address", "0.0.0.0"]
     
     if run_dir:
         cmd.extend(["--", "--run-dir", run_dir])
