@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vlalab"
-version = "0.1.0"
+version = "0.1.1"
 description = "A toolbox for tracking and visualizing the real-world deployment process of VLA models"
 readme = "README.md"
 license = {text = "MIT"}
@@ -26,8 +26,8 @@ classifiers = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "numpy>=1.20.0",
-    "matplotlib>=3.5.0",
+    "numpy>=1.20.0,<2.0.0",
+    "matplotlib>=3.5.0,<3.9.0",
     "pydantic>=2.0.0",
     "streamlit>=1.20.0",
     "opencv-python>=4.5.0",

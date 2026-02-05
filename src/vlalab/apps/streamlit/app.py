@@ -264,7 +264,7 @@ def main():
     # Footer
     st.sidebar.markdown("""
         <div class="sidebar-footer">
-            VLA-Lab v0.1.0<br>
+            VLA-Lab v0.1.1<br>
             <a href="https://github.com/VLA-Lab/VLA-Lab" style="color: #667eea;">GitHub</a>
         </div>
     """, unsafe_allow_html=True)
