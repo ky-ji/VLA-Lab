@@ -805,7 +805,7 @@ class InferenceRunViewer:
         with col4:
             st.metric("当前Chunk位置", f"{current_chunk_start}-{current_chunk_end}")
 
-    def render_inference_details_panel(self, step_idx: int):
+    def render_inference_details_panel(self, step_idx: int, show_language_prompt: bool = True):
         """Render detailed inference information panel."""
         if step_idx >= len(self.steps):
             return
@@ -815,12 +815,13 @@ class InferenceRunViewer:
         tags = step.get("tags", {})
         
         # Language Prompt
-        if prompt:
-            st.markdown("#### 🗣️ 语言指令")
-            st.info(f"**Prompt:** {prompt}")
-        elif self.meta.get("task_prompt"):
-            st.markdown("#### 🗣️ 语言指令")
-            st.info(f"**Task Prompt:** {self.meta.get('task_prompt')}")
+        if show_language_prompt:
+            if prompt:
+                st.markdown("#### 🗣️ 语言指令")
+                st.info(f"**Prompt:** {prompt}")
+            elif self.meta.get("task_prompt"):
+                st.markdown("#### 🗣️ 语言指令")
+                st.info(f"**Task Prompt:** {self.meta.get('task_prompt')}")
         
         # Global trends (Now Interactive) - Two views: Inference vs Execution
         st.markdown("#### 📈 全局状态与动作趋势")
@@ -900,6 +901,7 @@ class InferenceRunViewer:
                     st.markdown("**Client Config:**")
                     st.json(client_config)
     
+    
     def plot_replay_frame(self, step_idx: int, show_details: bool = True):
         """Plot replay frame for a step."""
         if not self.valid or step_idx >= len(self.steps):
@@ -910,13 +912,12 @@ class InferenceRunViewer:
         pred_action = self.get_step_action(step_idx)
         imgs = self.get_step_images(step_idx)
         
-        # Layout
-        c1, c2 = st.columns([1, 1.5])
+        # Layout: 左侧“视觉观测 + 动作规划”；右侧上提“状态/动作视图”
+        left_col, right_col = st.columns([1.5, 1.0])
         
-        with c1:
+        with left_col:
             st.markdown("#### 👁️ 模型视觉观测")
             if imgs:
-                # Display in a grid (up to 3 columns) to support multi-camera runs
                 cam_names = list(imgs.keys())
                 n_cols = min(3, max(1, len(cam_names)))
                 cols = st.columns(n_cols)
@@ -925,60 +926,99 @@ class InferenceRunViewer:
                         img = imgs[cam]
                         st.image(
                             img,
-                            caption=f"{cam} | Step {step_idx} | {img.shape}",
+                            caption=f"{cam}",
                             use_container_width=True,
                         )
             else:
                 st.warning("无图像数据")
-        
-        with c2:
+
             st.markdown("#### 🗺️ 3D 动作规划")
             
             if len(current_state) >= 3:
-                fig = plt.figure(figsize=(8, 6))
-                ax = fig.add_subplot(111, projection='3d')
-                
-                # Plot history
+                fig = go.Figure()
+
+                # --- 修复部分开始 ---
+                # 1. 历史轨迹 (History)
                 all_states = self.get_all_states()
                 if len(all_states) > 0 and all_states.shape[1] >= 3:
-                    start = max(0, step_idx - 50)
-                    hist = all_states[start:step_idx+1]
+                    # 获取从开始到当前步的所有轨迹
+                    hist = all_states[:step_idx+1]
+                    
                     if len(hist) > 1:
-                        ax.plot(hist[:,0], hist[:,1], hist[:,2], 'k-', alpha=0.3, label='History')
-                
-                # Current position
-                ax.scatter(current_state[0], current_state[1], current_state[2], 
-                          c='b', s=100, label='Current')
-                
-                # Predicted trajectory
+                        fig.add_trace(go.Scatter3d(
+                            x=hist[:, 0], y=hist[:, 1], z=hist[:, 2],
+                            mode='lines',
+                            # 【修改点】：颜色改为纯深灰(#555555)，不透明，宽度加粗到4
+                            line=dict(color='#555555', width=4), 
+                            name='History',
+                            hoverinfo='skip' 
+                        ))
+                # --- 修复部分结束 ---
+
+                # 2. 预测轨迹 (Pred)
                 if len(pred_action) > 0 and pred_action.ndim == 2 and pred_action.shape[1] >= 3:
-                    ax.plot(pred_action[:,0], pred_action[:,1], pred_action[:,2], 
-                           'r--', linewidth=2, label='Pred')
-                    ax.scatter(pred_action[-1,0], pred_action[-1,1], pred_action[-1,2], 
-                              c='r', marker='x', s=100)
+                    fig.add_trace(go.Scatter3d(
+                        x=pred_action[:, 0], y=pred_action[:, 1], z=pred_action[:, 2],
+                        mode='lines+markers',
+                        line=dict(color='rgba(255, 50, 50, 0.8)', width=4, dash='dot'),
+                        marker=dict(size=2, color='rgba(255, 50, 50, 0.8)'),
+                        name='Prediction'
+                    ))
+                    # 目标点
+                    fig.add_trace(go.Scatter3d(
+                        x=[pred_action[-1, 0]], y=[pred_action[-1, 1]], z=[pred_action[-1, 2]],
+                        mode='markers',
+                        marker=dict(size=5, color='red', symbol='diamond'),
+                        name='Target'
+                    ))
+
+                # 3. 当前位置 (Current)
+                fig.add_trace(go.Scatter3d(
+                    x=[current_state[0]], y=[current_state[1]], z=[current_state[2]],
+                    mode='markers',
+                    marker=dict(size=6, color='#2196F3', symbol='circle', line=dict(width=1, color='white')),
+                    name='Current'
+                ))
+
+                fig.update_layout(
+                    height=500,
+                    margin=dict(l=0, r=0, b=0, t=10),
+                    scene=dict(
+                        xaxis_title='X',
+                        yaxis_title='Y',
+                        zaxis_title='Z',
+                        aspectmode='data',
+                    ),
+                    legend=dict(
+                        x=0, y=1,
+                        bgcolor='rgba(255,255,255,0.6)',
+                        itemsizing='constant'
+                    ),
+                    uirevision='constant_scene_view'
+                )
                 
-                ax.set_xlabel('X')
-                ax.set_ylabel('Y')
-                ax.set_zlabel('Z')
-                ax.legend()
-                
-                # Set axis limits
-                if len(all_states) > 0 and all_states.shape[1] >= 3:
-                    margin = 0.1
-                    ax.set_xlim(all_states[:,0].min()-margin, all_states[:,0].max()+margin)
-                    ax.set_ylim(all_states[:,1].min()-margin, all_states[:,1].max()+margin)
-                    ax.set_zlim(all_states[:,2].min()-margin, all_states[:,2].max()+margin)
-                
-                st.pyplot(fig)
-                plt.close(fig)
+                st.plotly_chart(fig, use_container_width=True)
+
             else:
                 st.warning("状态维度不足，无法绘制3D轨迹")
+
+            # 左下方：语言指令
+            prompt = step.get("prompt")
+            task_prompt = self.meta.get("task_prompt") if self.meta else None
+            if prompt or task_prompt:
+                st.divider()
+                st.markdown("#### 🗣️ 语言指令")
+                if prompt:
+                    st.info(f"**Prompt:** {prompt}")
+                else:
+                    st.info(f"**Task Prompt:** {task_prompt}")
         
-        # Inference Details Panel
-        if show_details:
-            st.divider()
-            self.render_inference_details_panel(step_idx)
-    
+        with right_col:
+            if show_details:
+                self.render_inference_details_panel(step_idx, show_language_prompt=False)
+            else:
+                st.info("已关闭推理详情（侧边栏勾选“显示推理详情”可查看状态/动作视图）")
+            
     def plot_latency_analysis(self):
         """Plot latency analysis chart."""
         if not self.steps:

@@ -231,17 +231,24 @@ def main():
     
     # Navigation
     pages = {
-        "🏠 首页": "home",
+        "🚀 Get Started": "home",
         "🔬 推理回放": "inference",
         "📊 数据集浏览": "dataset",
         "📈 延迟分析": "latency",
         "🎯 开环评估": "eval",
     }
+
+    # 默认页：Inference Viewer（仅首次进入生效，之后保持用户选择）
+    nav_options = list(pages.keys())
+    default_nav = "🔬 推理回放"
+    if "vlalab_nav" not in st.session_state:
+        st.session_state.vlalab_nav = default_nav if default_nav in nav_options else nav_options[0]
     
     selection = st.sidebar.radio(
         "导航",
-        list(pages.keys()),
+        nav_options,
         label_visibility="collapsed",
+        key="vlalab_nav",
     )
     
     page_name = pages[selection]
@@ -273,9 +280,9 @@ def main():
 def show_home_page():
     # Hero section
     st.markdown("""
-        <div class="hero-title">VLA-Lab</div>
+        <div class="hero-title">Get Started</div>
         <div class="hero-subtitle">
-            专为 VLA (Vision-Language-Action) 模型设计的实机部署追踪与可视化工具箱
+            VLA (Vision-Language-Action) 实机部署追踪与可视化工具箱 · 快速上手指南
         </div>
     """, unsafe_allow_html=True)
     
@@ -369,7 +376,7 @@ logger.log_step(
 # vlalab view
 """, language="python")
     
-    st.info("👈 从左侧导航栏选择功能开始使用")
+    st.info("👈 默认已为你选中「推理回放」。如需查看指南或其它功能，可从左侧导航切换。")
 
 
 if __name__ == "__main__":
