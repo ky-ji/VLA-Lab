@@ -334,6 +334,7 @@ def plot_trajectory_results(
     fig.suptitle(
         f"Trajectory {result.trajectory_id} | MSE: {result.mse:.4f} | MAE: {result.mae:.4f}",
         fontsize=14,
+        y=1.0,
     )
     
     for i in range(num_dims):
@@ -359,7 +360,8 @@ def plot_trajectory_results(
         ax.legend(loc="upper right")
         ax.grid(True, alpha=0.3)
     
-    plt.tight_layout()
+    # rect=(left, bottom, right, top) — leave top space for suptitle
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
     
     if save_path:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
@@ -406,6 +408,8 @@ class OpenLoopEvaluator:
         dataset_path: str,
         dataset_format: str = "zarr",
         task_description: Optional[str] = None,
+        dataset_loader: Optional[DatasetLoader] = None,
+        **loader_kwargs,
     ):
         """
         Initialize evaluator.
@@ -415,14 +419,21 @@ class OpenLoopEvaluator:
             dataset_path: Path to dataset
             dataset_format: Dataset format ("zarr", "lerobot", etc.)
             task_description: Default task description for language-conditioned models
+            dataset_loader: Pre-constructed DatasetLoader instance (overrides dataset_format)
+            **loader_kwargs: Additional keyword arguments for the dataset loader
         """
         self.policy = policy
         self.dataset_path = dataset_path
         self.task_description = task_description
         
         # Load dataset
-        if dataset_format == "zarr":
+        if dataset_loader is not None:
+            self.dataset = dataset_loader
+        elif dataset_format == "zarr":
             self.dataset = ZarrDatasetLoader(dataset_path)
+        elif dataset_format == "lerobot":
+            from vlalab.eval.lerobot_loader import LeRobotDatasetLoader
+            self.dataset = LeRobotDatasetLoader(dataset_path, **loader_kwargs)
         else:
             raise ValueError(f"Unsupported dataset format: {dataset_format}")
         
@@ -488,9 +499,12 @@ class OpenLoopEvaluator:
             all_mse.append(result.mse)
             all_mae.append(result.mae)
             
-            # Save plot
+            # Save plot and raw arrays
             if save_plots_dir:
-                plot_path = Path(save_plots_dir) / f"traj_{traj_id}.png"
+                save_dir = Path(save_plots_dir)
+                save_dir.mkdir(parents=True, exist_ok=True)
+                
+                plot_path = save_dir / f"traj_{traj_id}.png"
                 plot_trajectory_results(
                     result,
                     action_keys=modality.action_keys,
@@ -498,11 +512,19 @@ class OpenLoopEvaluator:
                     save_path=str(plot_path),
                 )
                 plt.close()
+                
+                # Save raw arrays for interactive GUI visualization
+                np.save(str(save_dir / f"traj_{traj_id}_gt.npy"), result.gt_actions)
+                np.save(str(save_dir / f"traj_{traj_id}_pred.npy"), result.pred_actions)
+                if result.states is not None:
+                    np.save(str(save_dir / f"traj_{traj_id}_states.npy"), result.states)
         
         # Aggregate results
         output = {
             "results": [r.to_dict() for r in results],
             "num_trajectories": len(results),
+            "action_keys": modality.action_keys,
+            "action_horizon": config.action_horizon,
         }
         
         if all_mse:
