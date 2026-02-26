@@ -6,7 +6,7 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-orange.svg)](https://pypi.org/project/vlalab/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.1.1-orange.svg)](https://pypi.org/project/vlalab/)
 
 **Debug • Visualize • Analyze** your VLA deployments in the real world
 
@@ -96,7 +96,7 @@ pip install vlalab
 Or install from source:
 
 ```bash
-git clone https://github.com/VLA-Lab/VLA-Lab.git
+git clone https://github.com/ky-ji/VLA-Lab.git
 cd VLA-Lab
 pip install -e .
 ```
@@ -306,7 +306,7 @@ vlalab_runs/
 - [x] Streamlit visualization suite
 - [x] Diffusion Policy adapter
 - [x] GR00T adapter
-- [ ] OpenVLA adapter
+- [ ] Pi adapter
 - [ ] Cloud sync & team collaboration
 - [ ] Real-time streaming dashboard
 - [ ] Automatic failure detection
@@ -319,7 +319,7 @@ vlalab_runs/
 We welcome contributions! 
 
 ```bash
-git clone https://github.com/VLA-Lab/VLA-Lab.git
+git clone https://github.com/ky-ji/VLA-Lab.git
 cd VLA-Lab
 pip install -e .
 ```
