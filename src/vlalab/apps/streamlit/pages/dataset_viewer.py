@@ -66,44 +66,42 @@ class ZarrDatasetViewer:
         return data
     
     def plot_images_grid(self, episode_idx: int, step_interval: int = 5, max_frames: int = 20):
-        """Plot image grid for an episode."""
+        """Plot image grid for an episode (all camera views)."""
         if not self.image_keys:
             st.warning("数据集中没有图像数据")
             return
         
         episode_data = self.get_episode_data(episode_idx)
-        image_key = self.image_keys[0]
-        images = episode_data[image_key]
-        
-        total_frames = len(images)
-        frame_indices = list(range(0, total_frames, step_interval))[:max_frames]
-        n_frames = len(frame_indices)
-        
-        n_cols = 5
-        n_rows = (n_frames + n_cols - 1) // n_cols
-        
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(3*n_cols, 3*n_rows))
-        st.write(f"**Episode {episode_idx} - 图像概览 ({image_key})**")
-        
-        axes = np.atleast_2d(axes)
-        
-        for i, frame_idx in enumerate(frame_indices):
-            row, col = i // n_cols, i % n_cols
-            ax = axes[row, col]
-            image = images[frame_idx]
-            if image.shape[0] in [1, 3] and len(image.shape) == 3:
-                image = np.transpose(image, (1, 2, 0))
-            ax.imshow(image)
-            ax.set_title(f'Step {frame_idx}', fontsize=8)
-            ax.axis('off')
-        
-        for i in range(n_frames, n_rows * n_cols):
-            row, col = i // n_cols, i % n_cols
-            axes[row, col].axis('off')
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+
+        for image_key in self.image_keys:
+            images = episode_data[image_key]
+            total_frames = len(images)
+            frame_indices = list(range(0, total_frames, step_interval))[:max_frames]
+            n_frames = len(frame_indices)
+            
+            n_cols = 5
+            n_rows = (n_frames + n_cols - 1) // n_cols
+            
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(3*n_cols, 3*n_rows))
+            st.write(f"**Episode {episode_idx} - {image_key}**")
+            
+            axes = np.atleast_2d(axes)
+            
+            for i, frame_idx in enumerate(frame_indices):
+                row, col = i // n_cols, i % n_cols
+                ax = axes[row, col]
+                image = self._decode_image(images[frame_idx])
+                ax.imshow(image)
+                ax.set_title(f'Step {frame_idx}', fontsize=8)
+                ax.axis('off')
+            
+            for i in range(n_frames, n_rows * n_cols):
+                row, col = i // n_cols, i % n_cols
+                axes[row, col].axis('off')
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
     
     def plot_actions_summary(self, episode_idx: int):
         """Plot action summary for an episode."""
@@ -150,34 +148,42 @@ class ZarrDatasetViewer:
         st.pyplot(fig)
         plt.close(fig)
     
+    def _decode_image(self, raw_img: np.ndarray) -> np.ndarray:
+        """Decode a raw image array (handle CHW -> HWC)."""
+        if raw_img.shape[0] in [1, 3] and len(raw_img.shape) == 3:
+            return np.transpose(raw_img, (1, 2, 0))
+        return raw_img
+
     def plot_interactive_step(self, episode_idx: int, step_idx: int):
         """Plot interactive step view."""
         episode_data = self.get_episode_data(episode_idx)
         actions = episode_data['action']
         
-        # Get image
-        image = None
-        if self.image_keys:
-            image_key = self.image_keys[0]
+        # Get all camera images
+        images = {}
+        for image_key in self.image_keys:
             raw_img = episode_data[image_key][step_idx]
-            if raw_img.shape[0] in [1, 3] and len(raw_img.shape) == 3:
-                image = np.transpose(raw_img, (1, 2, 0))
-            else:
-                image = raw_img
+            images[image_key] = self._decode_image(raw_img)
         
         # Get action
         current_action = actions[step_idx]
         action_dim = actions.shape[1]
         
         # Layout
-        c1, c2 = st.columns([1.5, 1])
+        n_cams = max(len(images), 1)
+        cam_cols = st.columns(n_cams) if n_cams > 1 else [st.columns([1.5, 1])[0]]
         
-        with c1:
-            st.markdown(f"#### 📸 相机视角 (Step {step_idx})")
-            if image is not None:
-                st.image(image, use_container_width=True)
-            else:
+        if images:
+            for col, (cam_name, img) in zip(cam_cols, images.items()):
+                with col:
+                    st.markdown(f"#### 📸 {cam_name} (Step {step_idx})")
+                    st.image(img, use_container_width=True)
+        else:
+            with cam_cols[0]:
                 st.warning("无图像数据")
+        
+        # Robot state
+        c2 = st.container()
         
         with c2:
             st.markdown("#### 🤖 机器人状态")
