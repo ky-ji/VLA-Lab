@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import torch
-from omegaconf import OmegaConf, DictConfig
 
 from vlalab.eval.policy_interface import EvalPolicy, ModalityConfig
 
@@ -35,6 +33,8 @@ def load_vita_policy(
         (policy, cfg) tuple
     """
     import sys
+    import torch
+    from omegaconf import OmegaConf
     # Ensure flare and gym_av_aloha are importable
     cfg = OmegaConf.load(config_path)
 
@@ -96,7 +96,7 @@ class VitaAdapter(EvalPolicy):
     def __init__(
         self,
         policy,
-        cfg: DictConfig,
+        cfg,
         device: str = "cuda:0",
     ):
         self.policy = policy
@@ -128,6 +128,8 @@ class VitaAdapter(EvalPolicy):
         Returns:
             Action array of shape (action_horizon, action_dim)
         """
+        import torch
+
         batch = {}
 
         # Process state: (state_dim,) -> (1, 1, state_dim)

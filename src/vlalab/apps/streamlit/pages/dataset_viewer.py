@@ -11,13 +11,6 @@ from matplotlib.gridspec import GridSpec
 from pathlib import Path
 from typing import Optional, List
 
-# Setup matplotlib fonts
-try:
-    from vlalab.viz.mpl_fonts import setup_matplotlib_fonts
-    setup_matplotlib_fonts(verbose=False)
-except Exception:
-    pass
-
 
 class ZarrDatasetViewer:
     """Viewer for Zarr datasets (Diffusion Policy format)."""
@@ -182,7 +175,7 @@ class ZarrDatasetViewer:
         with c1:
             st.markdown(f"#### 📸 相机视角 (Step {step_idx})")
             if image is not None:
-                st.image(image, width='stretch')
+                st.image(image, use_container_width=True)
             else:
                 st.warning("无图像数据")
         

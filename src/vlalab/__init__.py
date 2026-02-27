@@ -59,8 +59,25 @@ from vlalab.core import (
 from vlalab.logging import RunLogger
 from vlalab.schema import StepRecord, RunMeta, ImageRef
 
-# Evaluation API
-from vlalab.eval import EvalPolicy, ModalityConfig, OpenLoopEvaluator
+# Evaluation API — lazy import to avoid pulling in heavy deps (torch, matplotlib)
+# at module load time. Actual imports happen on first attribute access.
+_EVAL_LAZY = {
+    "EvalPolicy": "vlalab.eval.policy_interface",
+    "ModalityConfig": "vlalab.eval.policy_interface",
+    "OpenLoopEvaluator": "vlalab.eval.open_loop_eval",
+}
+
+
+def __getattr__(name: str):
+    if name in _EVAL_LAZY:
+        import importlib
+        mod = importlib.import_module(_EVAL_LAZY[name])
+        obj = getattr(mod, name)
+        # Cache on module so subsequent access is fast
+        globals()[name] = obj
+        return obj
+    raise AttributeError(f"module 'vlalab' has no attribute {name}")
+
 
 __all__ = [
     # Version
@@ -82,7 +99,7 @@ __all__ = [
     "StepRecord",
     "RunMeta",
     "ImageRef",
-    # Evaluation API
+    # Evaluation API (lazy)
     "EvalPolicy",
     "ModalityConfig",
     "OpenLoopEvaluator",

@@ -12,7 +12,6 @@ import logging
 import json
 
 import numpy as np
-import matplotlib.pyplot as plt
 
 from vlalab.eval.policy_interface import EvalPolicy, ModalityConfig
 
@@ -317,6 +316,8 @@ def plot_trajectory_results(
     Returns:
         Matplotlib figure
     """
+    import matplotlib.pyplot as plt
+
     gt_actions = result.gt_actions
     pred_actions = result.pred_actions
     
@@ -499,8 +500,9 @@ class OpenLoopEvaluator:
             all_mse.append(result.mse)
             all_mae.append(result.mae)
             
-            # Save plot and raw arrays
+            # Save plot and raw arrays (import plt only when needed)
             if save_plots_dir:
+                import matplotlib.pyplot as plt
                 save_dir = Path(save_plots_dir)
                 save_dir.mkdir(parents=True, exist_ok=True)
                 
