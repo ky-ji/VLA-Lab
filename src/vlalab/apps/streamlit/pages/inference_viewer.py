@@ -624,7 +624,7 @@ class InferenceRunViewer:
             template="plotly_white",
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     def plot_global_execution_view(self, step_idx: int):
         """
@@ -791,7 +791,7 @@ class InferenceRunViewer:
         # Add x-axis label
         fig.update_xaxes(title_text="全局执行步 (Execution Step)", row=3, col=1)
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         # Show statistics
         col1, col2, col3, col4 = st.columns(4)
@@ -927,7 +927,7 @@ class InferenceRunViewer:
                         st.image(
                             img,
                             caption=f"{cam}",
-                            use_container_width=True,
+                            width='stretch',
                         )
             else:
                 st.warning("无图像数据")
@@ -997,7 +997,7 @@ class InferenceRunViewer:
                     uirevision='constant_scene_view'
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
             else:
                 st.warning("状态维度不足，无法绘制3D轨迹")
@@ -1177,7 +1177,7 @@ class InferenceRunViewer:
             "Min": [f"{np.min(actions[:, i]):.4f}" for i in range(min(action_dim, 8))],
             "Max": [f"{np.max(actions[:, i]):.4f}" for i in range(min(action_dim, 8))],
         }
-        st.dataframe(stats_data, use_container_width=True)
+        st.dataframe(stats_data, width='stretch')
 
 
 def render():

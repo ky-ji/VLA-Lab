@@ -182,7 +182,7 @@ class ZarrDatasetViewer:
         with c1:
             st.markdown(f"#### 📸 相机视角 (Step {step_idx})")
             if image is not None:
-                st.image(image, use_container_width=True)
+                st.image(image, width='stretch')
             else:
                 st.warning("无图像数据")
         

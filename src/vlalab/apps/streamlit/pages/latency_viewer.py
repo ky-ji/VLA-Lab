@@ -221,7 +221,7 @@ def render():
         
         import pandas as pd
         df = pd.DataFrame(stats_data)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width='stretch')
         
         # Performance assessment
         st.markdown("### 性能评估")

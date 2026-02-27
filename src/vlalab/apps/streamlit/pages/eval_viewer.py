@@ -405,7 +405,7 @@ def render():
             import pandas as pd
             df = pd.DataFrame(results["results"])
             df.columns = [c.replace("_", " ").title() for c in df.columns]
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
 
     # ── Trajectory selector ──
     if results_dir and available_traj_ids:
@@ -462,21 +462,21 @@ def render():
     # Tab 1: Time-series comparison
     with tabs[0]:
         fig = build_timeseries_chart(gt_actions, pred_actions, action_keys, action_horizon, selected_dims)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     # Tab 2: Error heatmap
     with tabs[1]:
         fig = build_error_heatmap(gt_actions, pred_actions, action_keys, action_horizon)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         st.markdown("#### ⏱️ 误差随时间演变")
         fig2 = build_error_timeseries(gt_actions, pred_actions, action_keys, action_horizon)
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width='stretch')
 
     # Tab 3: Per-dimension bar chart
     with tabs[2]:
         fig = build_per_dim_metrics_bar(gt_actions, pred_actions, action_keys)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         # Per-dimension statistics table
         st.markdown("#### 📋 逐维度统计")
@@ -493,7 +493,7 @@ def render():
                 "Mean Bias": f"{np.mean(err):+.6f}",
                 "Std": f"{np.std(err):.6f}",
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
     # Tab 4: 3D trajectory
     with tabs[3]:
@@ -506,14 +506,14 @@ def render():
             with col3:
                 zd = st.selectbox("Z 维度", all_dims, index=min(2, D - 1), format_func=lambda d: action_keys[d], key="3d_z")
             fig = build_3d_trajectory(gt_actions, pred_actions, (xd, yd, zd), action_keys)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.warning("动作维度不足 3，无法绘制 3D 轨迹。")
 
     # Tab 5: Error distribution
     with tabs[4]:
         fig = build_error_distribution(gt_actions, pred_actions, action_keys)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 
 def _show_usage_guide():
