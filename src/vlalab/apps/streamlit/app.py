@@ -336,17 +336,35 @@ def show_home_page():
     
     st.markdown("### 🔧 支持的框架")
     
-    col1, col2, col3 = st.columns([1, 1, 2])
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.markdown("""
-        **RealWorld-DP**  
+        **Diffusion Policy**  
         <span class="status-badge status-supported">✅ 已支持</span>
         """, unsafe_allow_html=True)
     
     with col2:
         st.markdown("""
         **Isaac-GR00T**  
+        <span class="status-badge status-supported">✅ 已支持</span>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown("""
+        **Pi 0.5**  
+        <span class="status-badge status-supported">✅ 已支持</span>
+        """, unsafe_allow_html=True)
+
+    with col4:
+        st.markdown("""
+        **DreamZero**  
+        <span class="status-badge status-supported">✅ 已支持</span>
+        """, unsafe_allow_html=True)
+
+    with col5:
+        st.markdown("""
+        **VITA**  
         <span class="status-badge status-supported">✅ 已支持</span>
         """, unsafe_allow_html=True)
     
