@@ -214,12 +214,16 @@ header[data-testid="stHeader"] {
 </style>
 """, unsafe_allow_html=True)
 
-# Setup matplotlib fonts
-try:
-    from vlalab.viz.mpl_fonts import setup_matplotlib_fonts
-    setup_matplotlib_fonts(verbose=False)
-except Exception:
-    pass
+# Setup matplotlib fonts (cached — only runs once per Streamlit server lifetime)
+@st.cache_resource
+def _init_matplotlib_fonts():
+    try:
+        from vlalab.viz.mpl_fonts import setup_matplotlib_fonts
+        setup_matplotlib_fonts(verbose=False)
+    except Exception:
+        pass
+
+_init_matplotlib_fonts()
 
 
 def main():

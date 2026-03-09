@@ -133,27 +133,24 @@ def main():
     "--run-dir", "-r", default=None, type=click.Path(exists=True),
     help="Default run directory to load"
 )
-@click.option(
-    "--kill", "-k", "kill_existing", is_flag=True, default=False,
-    help="Kill existing process on the port before starting"
-)
-def view(port: int, run_dir: str, kill_existing: bool):
+def view(port: int, run_dir: str):
     """Launch the Streamlit visualization app."""
     import subprocess
     import sys
     import time
     
-    # Check if port is in use
+    # Check if port is in use — auto-kill stale process by default
     if _is_port_in_use(port):
-        if kill_existing:
-            _kill_process_on_port(port, force=True)
-            time.sleep(1)  # Wait for port to be released
+        console.print(f"[yellow]Port {port} is in use, killing previous process...[/yellow]")
+        _kill_process_on_port(port, force=True)
+        # Wait for port to be released (up to 5 seconds)
+        for _ in range(10):
+            time.sleep(0.5)
+            if not _is_port_in_use(port):
+                break
         else:
-            console.print(f"[red]Port {port} is already in use![/red]")
-            console.print(f"[yellow]Options:[/yellow]")
-            console.print(f"  1. Run with --kill flag: vlalab view --kill")
-            console.print(f"  2. Use different port: vlalab view --port {port + 1}")
-            console.print(f"  3. Manually kill: vlalab kill --port {port}")
+            console.print(f"[red]Port {port} still in use after cleanup.[/red]")
+            console.print(f"[yellow]Try: vlalab view --port {port + 1}[/yellow]")
             raise click.Abort()
     
     app_path = Path(__file__).parent / "apps" / "streamlit" / "app.py"

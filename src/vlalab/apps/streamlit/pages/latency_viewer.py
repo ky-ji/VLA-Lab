@@ -13,13 +13,6 @@ from typing import List, Dict, Any
 
 import vlalab
 
-# Setup matplotlib fonts
-try:
-    from vlalab.viz.mpl_fonts import setup_matplotlib_fonts
-    setup_matplotlib_fonts(verbose=False)
-except Exception:
-    pass
-
 
 def load_timing_data(run_path: Path) -> List[Dict[str, Any]]:
     """Load timing data from a run."""
@@ -221,7 +214,7 @@ def render():
         
         import pandas as pd
         df = pd.DataFrame(stats_data)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width='stretch')
         
         # Performance assessment
         st.markdown("### 性能评估")

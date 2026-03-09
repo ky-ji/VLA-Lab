@@ -16,14 +16,13 @@ import cv2
 import shutil
 from typing import Optional, Dict, Any, List, Tuple
 
-import vlalab
-
-# Setup matplotlib fonts
+# Pre-import pandas to avoid circular import when plotly checks pd.Series
 try:
-    from vlalab.viz.mpl_fonts import setup_matplotlib_fonts
-    setup_matplotlib_fonts(verbose=False)
-except Exception:
+    import pandas  # noqa: F401
+except ImportError:
     pass
+
+import vlalab
 
 
 # Action 维度标签 (通用)
@@ -43,6 +42,10 @@ class InferenceRunViewer:
         self.valid = False
         self.steps = []
         self.meta = {}
+        # Instance-level caches for expensive computations
+        self._all_states_cache = None
+        self._state_action_cache = None
+        self._expanded_exec_cache = None
         self._load_data()
     
     def _load_data(self):
@@ -237,10 +240,13 @@ class InferenceRunViewer:
         return np.array(values) if values else np.array([])
     
     def get_all_states(self) -> np.ndarray:
-        """Get all states as array."""
+        """Get all states as array (cached)."""
+        if self._all_states_cache is not None:
+            return self._all_states_cache
         states = [self.get_step_state(i) for i in range(len(self.steps))]
         valid_states = [s for s in states if len(s) > 0]
-        return np.array(valid_states) if valid_states else np.array([])
+        self._all_states_cache = np.array(valid_states) if valid_states else np.array([])
+        return self._all_states_cache
     
     def plot_action_chunk_visualization(self, pred_action: np.ndarray, step_idx: int):
         """Plot detailed action chunk visualization."""
@@ -361,7 +367,7 @@ class InferenceRunViewer:
     
     def _extract_state_action_data(self) -> Tuple[np.ndarray, np.ndarray, List[str], List[str], int, int]:
         """
-        Extract state and action data from all steps.
+        Extract state and action data from all steps (cached).
         
         Returns:
             states_arr: (step_count, max_state_dim) array
@@ -371,6 +377,8 @@ class InferenceRunViewer:
             max_state_dim: max state dimension
             max_action_dim: max action dimension
         """
+        if self._state_action_cache is not None:
+            return self._state_action_cache
         step_count = len(self.steps)
         states_raw = []
         actions_raw = []
@@ -406,11 +414,12 @@ class InferenceRunViewer:
         state_dim_labels = self._get_state_dim_labels(max_state_dim) if max_state_dim > 0 else []
         action_dim_labels = self._get_action_dim_labels(max_action_dim) if max_action_dim > 0 else []
 
-        return states_arr, actions_arr, state_dim_labels, action_dim_labels, max_state_dim, max_action_dim
+        self._state_action_cache = (states_arr, actions_arr, state_dim_labels, action_dim_labels, max_state_dim, max_action_dim)
+        return self._state_action_cache
 
     def _extract_expanded_execution_data(self) -> Tuple[np.ndarray, List[Tuple[int, int]], List[str], int]:
         """
-        Expand all action chunks into a continuous execution timeline.
+        Expand all action chunks into a continuous execution timeline (cached).
         
         Returns:
             expanded_actions: (total_exec_steps, action_dim) array
@@ -418,6 +427,8 @@ class InferenceRunViewer:
             action_dim_labels: labels for action dimensions
             max_action_dim: max action dimension
         """
+        if self._expanded_exec_cache is not None:
+            return self._expanded_exec_cache
         expanded_actions_list = []
         chunk_boundaries = []
         max_action_dim = 0
@@ -440,7 +451,8 @@ class InferenceRunViewer:
                 chunk_boundaries.append((exec_idx, exec_idx))
 
         if not expanded_actions_list:
-            return np.array([]), chunk_boundaries, [], 0
+            self._expanded_exec_cache = (np.array([]), chunk_boundaries, [], 0)
+            return self._expanded_exec_cache
 
         # Pad to uniform dimension
         expanded_actions = np.full((len(expanded_actions_list), max_action_dim), np.nan)
@@ -448,7 +460,8 @@ class InferenceRunViewer:
             expanded_actions[i, :len(action)] = action
 
         action_dim_labels = self._get_action_dim_labels(max_action_dim)
-        return expanded_actions, chunk_boundaries, action_dim_labels, max_action_dim
+        self._expanded_exec_cache = (expanded_actions, chunk_boundaries, action_dim_labels, max_action_dim)
+        return self._expanded_exec_cache
 
     def plot_global_state_action(self, step_idx: int):
         """Plot global state/action trends and highlight current action chunk (Interactive).

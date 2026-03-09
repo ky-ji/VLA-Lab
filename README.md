@@ -146,7 +146,7 @@ pip install vlalab[full]
 或从源码安装：
 
 ```bash
-git clone https://github.com/VLA-Lab/VLA-Lab.git
+git clone https://github.com/ky-ji/VLA-Lab.git
 cd VLA-Lab
 pip install -e .
 ```
@@ -365,7 +365,7 @@ vlalab_runs/
 We welcome contributions! 
 
 ```bash
-git clone https://github.com/VLA-Lab/VLA-Lab.git
+git clone https://github.com/ky-ji/VLA-Lab.git
 cd VLA-Lab
 pip install -e ".[dev]"
 ```
