@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![PyPI version](https://img.shields.io/badge/pypi-v0.1.1-orange.svg)](https://pypi.org/project/vlalab/)
 
-**Log · Replay · Analyze · Evaluate** — 一站式 VLA 实机部署工具箱
+**Log · Replay · Analyze · Evaluate** — All-in-one toolkit for real-world VLA deployment
 
 [🚀 Quick Start](#-quick-start) · [📸 Screenshots](#-screenshots) · [🎯 Features](#-features) · [🔧 Installation](#-installation)
 
@@ -18,14 +18,14 @@
 
 ## 🎯 Why VLA-Lab?
 
-将 VLA 模型部署到真实机器人充满挑战：
+Deploying VLA models to real robots is **hard**. You face:
 
-- 🕵️ **黑盒推理** — 无法看到模型"看到了什么"或为什么失败
-- ⏱️ **隐藏时延** — 传输延迟、推理瓶颈、控制回路时序不透明
-- 📊 **日志碎片化** — 每个框架日志格式不同，跨模型对比极其痛苦
-- 🔄 **调试低效** — 复现故障需手动解析日志并逐步可视化
+- 🕵️ **Black-box inference** — Can't see what the model "sees" or why it fails
+- ⏱️ **Hidden latencies** — Transport delays, inference bottlenecks, control loop timing issues
+- 📊 **Fragmented logging** — Every framework logs differently, making cross-model comparison painful
+- 🔄 **Tedious debugging** — Replaying failures requires manual log parsing and visualization
 
-**VLA-Lab 解决这一切。** 统一的日志格式 + 交互式可视化面板，覆盖从数据采集到开环评估的完整工作流。
+**VLA-Lab solves this.** A unified logging format + interactive visualization dashboard covering the full workflow from data collection to open-loop evaluation.
 
 ---
 
@@ -35,36 +35,36 @@
 <tr>
 <td width="50%">
 
-### 🔬 推理回放 Inference Replay
-逐帧回放策略推理过程：多相机画面、3D 末端轨迹、全维度状态/动作曲线，一键定位部署故障。
+### 🔬 Inference Replay
+Step-by-step playback of policy inference: multi-camera views, 3D end-effector trajectories, full-dimensional state/action curves — pinpoint deployment failures instantly.
 
-### 📊 数据集浏览 Dataset Viewer
-交互式浏览 Zarr 格式训练数据：逐帧分析、全局统计概览、工作空间分布热力图。
+### 📊 Dataset Viewer
+Interactively browse Zarr-format training data: frame-by-frame analysis, global statistics overview, and workspace distribution heatmaps.
 
 </td>
 <td width="50%">
 
-### 📈 时延深度分析 Latency Analysis
-分解传输延迟、GPU 推理延迟、端到端回路时间，时序图 + 统计分布 + 多运行对比，快速识别瓶颈。
+### 📈 Latency Analysis
+Decompose transport delay, GPU inference latency, and end-to-end loop time. Time-series plots + statistical distributions + multi-run comparison to identify bottlenecks fast.
 
-### 🎯 开环评估 Open-Loop Eval
-对比模型预测动作与真实动作：MSE / MAE 指标汇总、时序对比、误差热力图、3D 轨迹叠加。
+### 🎯 Open-Loop Eval
+Compare predicted actions against ground truth: MSE / MAE metric summaries, temporal alignment, error heatmaps, and 3D trajectory overlay.
 
 </td>
 </tr>
 </table>
 
-### 🔧 支持的框架
+### 🔧 Supported Frameworks
 
-| 框架 | 状态 |
+| Framework | Status |
 |:---|:---:|
-| **Diffusion Policy** | ✅ 已支持 |
-| **Isaac-GR00T** | ✅ 已支持 |
-| **Pi 0.5** | ✅ 已支持 |
-| **DreamZero** | ✅ 已支持 |
-| **VITA** | ✅ 已支持 |
+| **Diffusion Policy** | ✅ Supported |
+| **Isaac-GR00T** | ✅ Supported |
+| **Pi 0.5** | ✅ Supported |
+| **DreamZero** | ✅ Supported |
+| **VITA** | ✅ Supported |
 
-> VLA-Lab 采用统一日志协议，适配新框架仅需几行胶水代码。
+> VLA-Lab uses a unified logging protocol — adapting a new framework takes only a few lines of glue code.
 
 ---
 
@@ -74,7 +74,7 @@
 <tr>
 <td colspan="2" align="center">
 
-#### 🚀 Get Started — 核心功能总览
+#### 🚀 Get Started — Feature Overview
 <img src="assets/intro.png" width="100%"/>
 
 </td>
@@ -82,48 +82,48 @@
 <tr>
 <td align="center" width="50%">
 
-#### 🔬 推理回放
+#### 🔬 Inference Replay
 <img src="assets/replay.png" width="100%"/>
-<sub>多相机画面 · 3D 末端轨迹 · 状态/动作全维曲线</sub>
+<sub>Multi-camera views · 3D end-effector trajectory · Full state/action curves</sub>
 
 </td>
 <td align="center" width="50%">
 
-#### 📈 时延深度分析
+#### 📈 Latency Analysis
 <img src="assets/delay_analysis.png" width="100%"/>
-<sub>传输 & 推理延迟时序图 · 统计分布 · 多运行对比</sub>
+<sub>Transport & inference latency time-series · Statistical distributions · Multi-run comparison</sub>
 
 </td>
 </tr>
 <tr>
 <td align="center" width="50%">
 
-#### 📊 数据集逐帧分析
+#### 📊 Dataset Frame-by-Frame Analysis
 <img src="assets/dataset_view.png" width="100%"/>
-<sub>相机画面 · 机器人状态 · 时间轴滑动</sub>
+<sub>Camera views · Robot state · Timeline scrubbing</sub>
 
 </td>
 <td align="center" width="50%">
 
-#### 📊 数据集全局概览
+#### 📊 Dataset Global Overview
 <img src="assets/dataset_global.png" width="100%"/>
-<sub>Episode 统计 · 动作分布 · 图像网格</sub>
+<sub>Episode statistics · Action distributions · Image grid</sub>
 
 </td>
 </tr>
 <tr>
 <td align="center" width="50%">
 
-#### 📊 工作空间分布
+#### 📊 Workspace Distribution
 <img src="assets/dataset_space.png" width="100%"/>
-<sub>3D 工作空间采样密度可视化</sub>
+<sub>3D workspace sampling density visualization</sub>
 
 </td>
 <td align="center" width="50%">
 
-#### 🎯 开环评估
+#### 🎯 Open-Loop Evaluation
 <img src="assets/openloop_eval.png" width="100%"/>
-<sub>MSE/MAE 汇总 · 时序对比 · 误差热力图 · 3D 轨迹</sub>
+<sub>MSE/MAE summary · Temporal comparison · Error heatmap · 3D trajectories</sub>
 
 </td>
 </tr>
@@ -137,13 +137,13 @@
 pip install vlalab
 ```
 
-安装完整依赖（含 Zarr 数据集支持）：
+Install with full dependencies (including Zarr dataset support):
 
 ```bash
 pip install vlalab[full]
 ```
 
-或从源码安装：
+Or install from source:
 
 ```bash
 git clone https://github.com/ky-ji/VLA-Lab.git
