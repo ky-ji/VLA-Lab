@@ -210,9 +210,47 @@ vlalab.finish()
 ### Launch Visualization
 
 ```bash
-# One command to view all your runs
+# Default web dashboard (FastAPI + Next.js)
 vlalab view
 ```
+
+### Launch Web Dashboard (FastAPI + Next.js)
+
+```bash
+# 1. Install Python package
+pip install -e .
+
+# 2. Install web dependencies once
+cd web
+npm install
+cd ..
+
+# 3. Start FastAPI + Next.js together
+vlalab view
+```
+
+Useful variants:
+
+```bash
+# Start only the API backend
+vlalab serve --no-frontend
+
+# Change the frontend port
+vlalab view --port 3100
+
+# Override the run directory used by the API
+vlalab view --run-dir /path/to/vlalab_runs
+
+# Launch the old Streamlit app
+vlalab view --legacy --port 8501
+```
+
+The new web UI now covers the main legacy workflows:
+
+- overview / run list / run detail
+- latency comparison
+- dataset viewer
+- open-loop eval viewer
 
 ---
 
@@ -314,8 +352,14 @@ logger.close()
 ### CLI Commands
 
 ```bash
-# Launch visualization dashboard
-vlalab view [--port 8501]
+# Launch the default FastAPI + Next.js dashboard
+vlalab view [--port 3000] [--api-port 8000]
+
+# Launch the old Streamlit dashboard
+vlalab view --legacy [--port 8501]
+
+# Launch FastAPI backend and optional Next.js frontend
+vlalab serve [--api-port 8000] [--web-port 3000] [--frontend/--no-frontend]
 
 # Convert legacy logs (auto-detects format)
 vlalab convert /path/to/old_log.json -o /path/to/output

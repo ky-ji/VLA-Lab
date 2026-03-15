@@ -2,7 +2,8 @@
 VLA-Lab Command Line Interface
 
 Commands:
-- vlalab view: Launch Streamlit visualization app
+- vlalab view: Launch the default visualization app
+- vlalab serve: Launch the FastAPI backend and optional Next.js frontend
 - vlalab convert: Convert old log formats to VLA-Lab run format
 - vlalab init-run: Initialize a new run directory
 - vlalab info: Show information about a run
@@ -16,15 +17,43 @@ from rich.table import Table
 import os
 import signal
 import atexit
+import sys
+from typing import Optional
 
 console = Console()
 
 # PID file location
-def _get_pid_file(port: int) -> Path:
+def _get_pid_file(port: int, prefix: str = "view") -> Path:
     """Get PID file path for a given port."""
     pid_dir = Path.home() / ".vlalab"
     pid_dir.mkdir(exist_ok=True)
-    return pid_dir / f"view_{port}.pid"
+    return pid_dir / f"{prefix}_{port}.pid"
+
+
+def _terminate_process_group(proc) -> None:
+    """Terminate a process group if it is still alive."""
+    if proc and proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def _cleanup_pid_file(port: int, prefix: str = "view") -> None:
+    """Remove the PID file for a service if it exists."""
+    _get_pid_file(port, prefix=prefix).unlink(missing_ok=True)
+
+
+def _resolve_web_dir() -> Path:
+    """Locate the bundled Next.js frontend."""
+    candidates = [
+        Path(__file__).resolve().parents[2] / "web",
+        Path.cwd() / "web",
+    ]
+    for candidate in candidates:
+        if (candidate / "package.json").exists():
+            return candidate
+    raise FileNotFoundError("Could not locate the VLA-Lab web/ directory.")
 
 
 def _kill_process_on_port(port: int, force: bool = False) -> bool:
@@ -35,12 +64,13 @@ def _kill_process_on_port(port: int, force: bool = False) -> bool:
     import subprocess
     
     # Method 1: Check PID file first
-    pid_file = _get_pid_file(port)
-    if pid_file.exists():
+    for prefix in ("view", "api", "web"):
+        pid_file = _get_pid_file(port, prefix=prefix)
+        if not pid_file.exists():
+            continue
         try:
             pid = int(pid_file.read_text().strip())
-            # Check if process is still running
-            os.kill(pid, 0)  # Signal 0 just checks if process exists
+            os.kill(pid, 0)
             if force:
                 os.kill(pid, signal.SIGKILL)
                 console.print(f"[yellow]Killed previous VLA-Lab process (PID: {pid})[/yellow]")
@@ -50,7 +80,6 @@ def _kill_process_on_port(port: int, force: bool = False) -> bool:
             pid_file.unlink(missing_ok=True)
             return True
         except (ProcessLookupError, ValueError):
-            # Process doesn't exist, clean up stale PID file
             pid_file.unlink(missing_ok=True)
         except PermissionError:
             console.print(f"[red]Permission denied to kill process[/red]")
@@ -107,15 +136,237 @@ def _is_port_in_use(port: int) -> bool:
 
 def _cleanup_on_exit(port: int, proc):
     """Cleanup function called on exit."""
-    pid_file = _get_pid_file(port)
-    pid_file.unlink(missing_ok=True)
-    
-    if proc and proc.poll() is None:
-        # Process still running, terminate it
+    _cleanup_pid_file(port)
+    _terminate_process_group(proc)
+
+
+def _ensure_port_available(port: int, action_hint: str) -> None:
+    """Ensure a port is free before launching a new service."""
+    import time
+
+    if not _is_port_in_use(port):
+        return
+
+    console.print(f"[yellow]Port {port} is in use, killing previous process...[/yellow]")
+    _kill_process_on_port(port, force=True)
+    for _ in range(10):
+        time.sleep(0.5)
+        if not _is_port_in_use(port):
+            return
+
+    console.print(f"[red]Port {port} still in use after cleanup.[/red]")
+    console.print(f"[yellow]Try: {action_hint}[/yellow]")
+    raise click.Abort()
+
+
+def _missing_python_modules(modules) -> list[str]:
+    """Return the list of modules that cannot be imported in the current env."""
+    missing = []
+    for module_name in modules:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
+            __import__(module_name)
+        except ModuleNotFoundError:
+            missing.append(module_name)
+    return missing
+
+
+def _ensure_web_python_dependencies(install: bool = False) -> None:
+    """Ensure FastAPI web-mode dependencies are available before launch."""
+    required = ["fastapi", "uvicorn"]
+    missing = _missing_python_modules(required)
+    if not missing:
+        return
+
+    if install:
+        console.print(
+            f"[blue]Installing missing Python web dependencies: {', '.join(missing)}[/blue]"
+        )
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", *missing],
+            check=False,
+        )
+        if result.returncode == 0 and not _missing_python_modules(required):
+            return
+
+        console.print("[red]Automatic Python dependency installation failed.[/red]")
+        raise click.Abort()
+
+    console.print(
+        "[red]Missing Python web dependencies:[/red] "
+        + ", ".join(missing)
+    )
+    console.print(
+        "[yellow]Run `vlalab view --install` or "
+        f"`{sys.executable} -m pip install {' '.join(missing)}` first.[/yellow]"
+    )
+    raise click.Abort()
+
+
+def _launch_streamlit_view(port: int, run_dir: str):
+    """Launch the legacy Streamlit visualization app."""
+    import subprocess
+    import sys
+
+    _ensure_port_available(port, f"vlalab view --legacy --port {port + 1}")
+
+    app_path = Path(__file__).parent / "apps" / "streamlit" / "app.py"
+
+    if not app_path.exists():
+        import vlalab
+
+        package_dir = Path(vlalab.__file__).parent
+        app_path = package_dir / "apps" / "streamlit" / "app.py"
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(app_path),
+        "--server.port",
+        str(port),
+        "--server.address",
+        "0.0.0.0",
+    ]
+
+    if run_dir:
+        cmd.extend(["--", "--run-dir", run_dir])
+
+    console.print(f"[green]Starting legacy VLA-Lab Streamlit viewer on port {port}...[/green]")
+
+    proc = subprocess.Popen(cmd, start_new_session=True)
+    pid_file = _get_pid_file(port, prefix="view")
+    pid_file.write_text(str(proc.pid))
+    atexit.register(lambda: _cleanup_on_exit(port, proc))
+
+    def signal_handler(signum, frame):
+        console.print("\n[yellow]Shutting down VLA-Lab viewer...[/yellow]")
+        _terminate_process_group(proc)
+        pid_file.unlink(missing_ok=True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        proc.wait()
+    finally:
+        pid_file.unlink(missing_ok=True)
+
+
+def _launch_web_services(
+    host: str,
+    api_port: int,
+    web_port: int,
+    frontend: bool,
+    install: bool,
+    run_dir: str,
+):
+    """Launch the FastAPI backend and optional Next.js frontend."""
+    import subprocess
+    import time
+
+    _ensure_web_python_dependencies(install=install)
+
+    if frontend and api_port == web_port:
+        console.print("[red]api-port and web-port must be different when frontend is enabled.[/red]")
+        raise click.Abort()
+
+    _ensure_port_available(api_port, f"vlalab view --api-port {api_port + 1}")
+    if frontend:
+        _ensure_port_available(web_port, f"vlalab view --port {web_port + 1}")
+
+    env = os.environ.copy()
+    if run_dir:
+        env["VLALAB_DIR"] = str(Path(run_dir).resolve())
+
+    api_cmd = [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "vlalab.apps.webapi.main:app",
+        "--host",
+        host,
+        "--port",
+        str(api_port),
+    ]
+
+    console.print(f"[green]Starting VLA-Lab API on port {api_port}...[/green]")
+    api_proc = subprocess.Popen(api_cmd, start_new_session=True, env=env)
+    api_pid = _get_pid_file(api_port, prefix="api")
+    api_pid.write_text(str(api_proc.pid))
+
+    processes = [("API", api_proc, api_pid)]
+    atexit.register(lambda: _cleanup_on_exit(api_port, api_proc))
+
+    if frontend:
+        try:
+            web_dir = _resolve_web_dir()
+        except FileNotFoundError as exc:
+            console.print(f"[red]{exc}[/red]")
+            _cleanup_on_exit(api_port, api_proc)
+            raise click.Abort()
+
+        frontend_env = env.copy()
+        api_base_url = f"http://127.0.0.1:{api_port}"
+        frontend_env["VLALAB_API_BASE_URL"] = api_base_url
+        frontend_env["NEXT_PUBLIC_VLALAB_API_BASE_URL"] = api_base_url
+
+        if install or not (web_dir / "node_modules").exists():
+            console.print("[blue]Installing frontend dependencies in web/...[/blue]")
+            result = subprocess.run(
+                ["npm", "install", "--no-package-lock"],
+                cwd=web_dir,
+                env=frontend_env,
+                check=False,
+            )
+            if result.returncode != 0:
+                console.print("[red]npm install failed, stopping API process.[/red]")
+                _cleanup_on_exit(api_port, api_proc)
+                raise click.Abort()
+
+        console.print(f"[green]Starting VLA-Lab frontend on port {web_port}...[/green]")
+        web_cmd = ["npm", "run", "dev", "--", "-H", host, "-p", str(web_port)]
+        web_proc = subprocess.Popen(
+            web_cmd,
+            cwd=web_dir,
+            start_new_session=True,
+            env=frontend_env,
+        )
+        web_pid = _get_pid_file(web_port, prefix="web")
+        web_pid.write_text(str(web_proc.pid))
+        processes.append(("Frontend", web_proc, web_pid))
+        atexit.register(lambda: _cleanup_on_exit(web_port, web_proc))
+
+    console.print(f"[green]API[/green]: http://127.0.0.1:{api_port}/api/health")
+    if frontend:
+        console.print(f"[green]Web[/green]: http://127.0.0.1:{web_port}")
+
+    def cleanup_all():
+        for name, proc, pid_file in reversed(processes):
+            pid_file.unlink(missing_ok=True)
+            _terminate_process_group(proc)
+
+    def signal_handler(signum, frame):
+        console.print("\n[yellow]Shutting down VLA-Lab web services...[/yellow]")
+        cleanup_all()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        while True:
+            for name, proc, _ in processes:
+                code = proc.poll()
+                if code is not None:
+                    console.print(f"[yellow]{name} exited with code {code}[/yellow]")
+                    raise KeyboardInterrupt
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        cleanup_all()
 
 
 @click.group()
@@ -127,78 +378,67 @@ def main():
 
 @main.command()
 @click.option(
-    "--port", "-p", default=8501, type=int, help="Port for Streamlit server"
+    "--port", "-p", default=None, type=int,
+    help="Frontend port for the web UI, or the Streamlit port when --legacy is enabled"
 )
+@click.option("--api-port", default=8000, type=int, help="Port for the FastAPI backend")
+@click.option("--host", default="0.0.0.0", help="Host for the web services")
+@click.option(
+    "--install/--no-install",
+    default=False,
+    help="Run npm install in web/ before starting the frontend",
+)
+@click.option("--legacy", is_flag=True, default=False, help="Launch the old Streamlit viewer instead of the web UI")
 @click.option(
     "--run-dir", "-r", default=None, type=click.Path(exists=True),
     help="Default run directory to load"
 )
-def view(port: int, run_dir: str):
-    """Launch the Streamlit visualization app."""
-    import subprocess
-    import sys
-    import time
-    
-    # Check if port is in use — auto-kill stale process by default
-    if _is_port_in_use(port):
-        console.print(f"[yellow]Port {port} is in use, killing previous process...[/yellow]")
-        _kill_process_on_port(port, force=True)
-        # Wait for port to be released (up to 5 seconds)
-        for _ in range(10):
-            time.sleep(0.5)
-            if not _is_port_in_use(port):
-                break
-        else:
-            console.print(f"[red]Port {port} still in use after cleanup.[/red]")
-            console.print(f"[yellow]Try: vlalab view --port {port + 1}[/yellow]")
-            raise click.Abort()
-    
-    app_path = Path(__file__).parent / "apps" / "streamlit" / "app.py"
-    
-    if not app_path.exists():
-        # Fallback to package data location
-        import vlalab
-        package_dir = Path(vlalab.__file__).parent
-        app_path = package_dir / "apps" / "streamlit" / "app.py"
-    
-    cmd = [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port), "--server.address", "0.0.0.0"]
-    
-    if run_dir:
-        cmd.extend(["--", "--run-dir", run_dir])
-    
-    console.print(f"[green]Starting VLA-Lab viewer on port {port}...[/green]")
-    
-    # Start process in a new process group so we can kill all children
-    proc = subprocess.Popen(
-        cmd,
-        start_new_session=True,  # Creates new process group
+def view(port: Optional[int], api_port: int, host: str, install: bool, legacy: bool, run_dir: str):
+    """Launch the default VLA-Lab viewer."""
+    resolved_port = port if port is not None else (8501 if legacy else 3000)
+
+    if legacy:
+        _launch_streamlit_view(port=resolved_port, run_dir=run_dir)
+        return
+
+    _launch_web_services(
+        host=host,
+        api_port=api_port,
+        web_port=resolved_port,
+        frontend=True,
+        install=install,
+        run_dir=run_dir,
     )
-    
-    # Save PID to file
-    pid_file = _get_pid_file(port)
-    pid_file.write_text(str(proc.pid))
-    
-    # Register cleanup on exit
-    atexit.register(lambda: _cleanup_on_exit(port, proc))
-    
-    # Handle signals
-    def signal_handler(signum, frame):
-        console.print(f"\n[yellow]Shutting down VLA-Lab viewer...[/yellow]")
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
-        pid_file.unlink(missing_ok=True)
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Wait for process
-    try:
-        proc.wait()
-    finally:
-        pid_file.unlink(missing_ok=True)
+
+
+@main.command()
+@click.option("--host", default="0.0.0.0", help="Host for the web services")
+@click.option("--api-port", default=8000, type=int, help="Port for the FastAPI backend")
+@click.option("--web-port", default=3000, type=int, help="Port for the Next.js frontend")
+@click.option(
+    "--frontend/--no-frontend",
+    default=True,
+    help="Launch the Next.js frontend alongside the API",
+)
+@click.option(
+    "--install/--no-install",
+    default=False,
+    help="Run npm install in web/ before starting the frontend",
+)
+@click.option(
+    "--run-dir", "-r", default=None, type=click.Path(exists=True),
+    help="Override the VLALAB_DIR used by the API"
+)
+def serve(host: str, api_port: int, web_port: int, frontend: bool, install: bool, run_dir: str):
+    """Launch the FastAPI backend and optional Next.js frontend."""
+    _launch_web_services(
+        host=host,
+        api_port=api_port,
+        web_port=web_port,
+        frontend=frontend,
+        install=install,
+        run_dir=run_dir,
+    )
 
 
 @main.command()
@@ -218,10 +458,13 @@ def kill(port: int, force: bool):
             console.print(f"[red]Failed to kill process on port {port}[/red]")
             console.print(f"[yellow]Try manually: fuser -k {port}/tcp[/yellow]")
     else:
-        # Still try to clean up PID file
-        pid_file = _get_pid_file(port)
-        if pid_file.exists():
-            pid_file.unlink()
+        cleaned = False
+        for prefix in ("view", "api", "web"):
+            pid_file = _get_pid_file(port, prefix=prefix)
+            if pid_file.exists():
+                pid_file.unlink()
+                cleaned = True
+        if cleaned:
             console.print(f"[green]Cleaned up stale PID file[/green]")
         else:
             console.print(f"[green]Port {port} is not in use[/green]")

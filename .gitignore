@@ -103,6 +103,9 @@ example_runs/
 *.log
 *.jsonl
 artifacts/
+web/node_modules/
+web/.next/
+web/out/
 
 # Large files
 *.mp4
