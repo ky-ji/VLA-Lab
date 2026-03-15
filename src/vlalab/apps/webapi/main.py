@@ -25,6 +25,7 @@ from .eval_service import load_eval_inline, load_eval_view
 from .replay_service import delete_run, generate_attention, load_attention_state, load_run_replay
 from .service import (
     build_latency_compare,
+    count_runs,
     get_runs_dir,
     list_projects,
     list_run_summaries,
@@ -66,11 +67,12 @@ def health() -> dict:
 def overview() -> OverviewResponse:
     runs_dir = get_runs_dir()
     projects = list_projects(runs_dir)
+    run_count = count_runs(runs_dir)
     latest_runs = list_run_summaries(runs_dir, limit=6)
     return OverviewResponse(
         runs_dir=str(runs_dir),
         project_count=len(projects),
-        run_count=len(list_run_summaries(runs_dir, limit=10_000)),
+        run_count=run_count,
         latest_runs=latest_runs,
     )
 
@@ -293,10 +295,14 @@ def eval_inline(payload: dict = Body(default_factory=dict)) -> dict:
 
 
 @app.get("/api/eval/static-image")
-def eval_static_image(path: str) -> FileResponse:
+def eval_static_image(path: str, dir_path: Optional[str] = None) -> FileResponse:
     image_path = Path(path).expanduser().resolve()
-    if image_path.suffix.lower() != ".png":
-        raise HTTPException(status_code=400, detail="Only PNG images are supported")
+    if image_path.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+        raise HTTPException(status_code=400, detail="Only PNG/JPEG images are supported")
+    if dir_path:
+        allowed_root = Path(dir_path).expanduser().resolve()
+        if allowed_root not in image_path.parents and image_path != allowed_root:
+            raise HTTPException(status_code=403, detail="Image path outside allowed directory")
     if not image_path.exists():
         raise HTTPException(status_code=404, detail=f"Eval image not found: {image_path}")
     return FileResponse(image_path)

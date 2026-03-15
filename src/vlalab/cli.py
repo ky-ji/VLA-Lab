@@ -10,15 +10,17 @@ Commands:
 - vlalab kill: Kill VLA-Lab processes on a port
 """
 
-import click
-from pathlib import Path
-from rich.console import Console
-from rich.table import Table
+import atexit
 import os
 import signal
-import atexit
+import subprocess
 import sys
+from pathlib import Path
 from typing import Optional
+
+import click
+from rich.console import Console
+from rich.table import Table
 
 console = Console()
 
@@ -61,8 +63,6 @@ def _kill_process_on_port(port: int, force: bool = False) -> bool:
     Kill any process running on the specified port.
     Returns True if a process was killed.
     """
-    import subprocess
-    
     # Method 1: Check PID file first
     for prefix in ("view", "api", "web"):
         pid_file = _get_pid_file(port, prefix=prefix)
@@ -86,50 +86,49 @@ def _kill_process_on_port(port: int, force: bool = False) -> bool:
     
     # Method 2: Use fuser/lsof to find process on port
     try:
-        # Try fuser first (more reliable on Linux)
         result = subprocess.run(
             ["fuser", f"{port}/tcp"],
             capture_output=True,
-            text=True
+            text=True,
         )
         if result.stdout.strip():
-            pids = result.stdout.strip().split()
-            for pid in pids:
+            pid_strs = result.stdout.strip().split()
+            for pid_str in pid_strs:
                 try:
-                    pid = int(pid.strip())
+                    target_pid = int(pid_str.strip())
                     sig = signal.SIGKILL if force else signal.SIGTERM
-                    os.kill(pid, sig)
-                    console.print(f"[yellow]Killed process on port {port} (PID: {pid})[/yellow]")
+                    os.kill(target_pid, sig)
+                    console.print(f"[yellow]Killed process on port {port} (PID: {target_pid})[/yellow]")
                 except (ProcessLookupError, ValueError, PermissionError):
                     pass
             return True
     except FileNotFoundError:
-        # fuser not available, try lsof
         try:
             result = subprocess.run(
                 ["lsof", "-t", f"-i:{port}"],
                 capture_output=True,
-                text=True
+                text=True,
             )
             if result.stdout.strip():
-                for pid in result.stdout.strip().split('\n'):
+                for pid_str in result.stdout.strip().split("\n"):
                     try:
-                        pid = int(pid.strip())
+                        target_pid = int(pid_str.strip())
                         sig = signal.SIGKILL if force else signal.SIGTERM
-                        os.kill(pid, sig)
-                        console.print(f"[yellow]Killed process on port {port} (PID: {pid})[/yellow]")
+                        os.kill(target_pid, sig)
+                        console.print(f"[yellow]Killed process on port {port} (PID: {target_pid})[/yellow]")
                     except (ProcessLookupError, ValueError, PermissionError):
                         pass
                 return True
         except FileNotFoundError:
             pass
-    
+
     return False
 
 
 def _is_port_in_use(port: int) -> bool:
     """Check if a port is in use."""
     import socket
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('localhost', port)) == 0
 
@@ -181,8 +180,6 @@ def _ensure_web_python_dependencies(install: bool = False) -> None:
         console.print(
             f"[blue]Installing missing Python web dependencies: {', '.join(missing)}[/blue]"
         )
-        import subprocess
-
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", *missing],
             check=False,
@@ -206,9 +203,6 @@ def _ensure_web_python_dependencies(install: bool = False) -> None:
 
 def _launch_streamlit_view(port: int, run_dir: str):
     """Launch the legacy Streamlit visualization app."""
-    import subprocess
-    import sys
-
     _ensure_port_available(port, f"vlalab view --legacy --port {port + 1}")
 
     app_path = Path(__file__).parent / "apps" / "streamlit" / "app.py"
@@ -265,7 +259,6 @@ def _launch_web_services(
     run_dir: str,
 ):
     """Launch the FastAPI backend and optional Next.js frontend."""
-    import subprocess
     import time
 
     _ensure_web_python_dependencies(install=install)
@@ -485,21 +478,17 @@ def kill(port: int, force: bool):
 def convert(input_path: str, output: str, input_format: str):
     """Convert old log formats to VLA-Lab run format."""
     from vlalab.adapters.converter import convert_legacy_log
-    
-    input_path = Path(input_path)
-    
-    if output is None:
-        output = input_path.parent / f"run_{input_path.stem}"
-    
-    output = Path(output)
-    
-    console.print(f"[blue]Converting {input_path} -> {output}[/blue]")
-    
+
+    src = Path(input_path)
+    dst = Path(output) if output is not None else src.parent / f"run_{src.stem}"
+
+    console.print(f"[blue]Converting {src} -> {dst}[/blue]")
+
     try:
-        stats = convert_legacy_log(input_path, output, input_format)
+        stats = convert_legacy_log(src, dst, input_format)
         console.print(f"[green]Converted {stats['steps']} steps, {stats['images']} images[/green]")
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+    except Exception as exc:
+        console.print(f"[red]Error: {exc}[/red]")
         raise click.Abort()
 
 
@@ -511,17 +500,17 @@ def convert(input_path: str, output: str, input_format: str):
 def init_run(run_dir: str, model: str, task: str, robot: str):
     """Initialize a new run directory with metadata."""
     from vlalab.logging import RunLogger
-    
-    run_dir = Path(run_dir)
-    
+
+    target = Path(run_dir)
+
     logger = RunLogger(
-        run_dir=run_dir,
+        run_dir=target,
         model_name=model,
         task_name=task,
         robot_name=robot,
     )
     
-    console.print(f"[green]Initialized run directory: {run_dir}[/green]")
+    console.print(f"[green]Initialized run directory: {target}[/green]")
     console.print(f"  Model: {model}")
     console.print(f"  Task: {task}")
     console.print(f"  Robot: {robot}")
@@ -532,22 +521,22 @@ def init_run(run_dir: str, model: str, task: str, robot: str):
 def info(run_dir: str):
     """Show information about a run."""
     from vlalab.logging.run_loader import load_run_info
-    
-    run_dir = Path(run_dir)
-    
+
+    target = Path(run_dir)
+
     try:
-        info = load_run_info(run_dir)
-        
-        table = Table(title=f"Run: {run_dir.name}")
+        run_info = load_run_info(target)
+
+        table = Table(title=f"Run: {target.name}")
         table.add_column("Field", style="cyan")
         table.add_column("Value", style="green")
         
-        for key, value in info.items():
+        for key, value in run_info.items():
             table.add_row(key, str(value))
-        
+
         console.print(table)
-    except Exception as e:
-        console.print(f"[red]Error loading run: {e}[/red]")
+    except Exception as exc:
+        console.print(f"[red]Error loading run: {exc}[/red]")
 
 
 if __name__ == "__main__":

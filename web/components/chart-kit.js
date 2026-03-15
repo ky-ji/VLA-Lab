@@ -444,7 +444,7 @@ export function TimelineEvents({ events = [] }) {
   const offsets = events.map((item) => Number(item.offset_ms));
 
   if (!events.length) {
-    return <div className="chart-empty">No timing events</div>;
+    return <div className="chart-empty">无时序事件</div>;
   }
 
   const min = Math.min(...offsets);
@@ -454,7 +454,7 @@ export function TimelineEvents({ events = [] }) {
 
   return (
     <div className="chart-shell">
-      <div className="chart-title">Step timeline</div>
+      <div className="chart-title">帧时间线</div>
       <svg viewBox={`0 0 ${width} ${height}`} className="chart-svg">
         <rect x="0" y="0" width={width} height={height} rx="24" fill="rgba(255,255,255,0.86)" />
         <line x1={padding} y1={height / 2} x2={width - padding} y2={height / 2} stroke="rgba(31,41,51,0.24)" strokeWidth="2" />

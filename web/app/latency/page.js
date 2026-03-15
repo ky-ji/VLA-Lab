@@ -14,7 +14,7 @@ export default async function LatencyPage() {
   const initialCompare = initialRunIds.length ? await getLatencyCompare(initialRunIds) : { items: [] };
 
   return (
-    <HydrationGuard label="正在加载时延分析界面...">
+    <HydrationGuard label="正在加载时延分析 ...">
       <LatencyCompareClient initialRuns={initialRuns} initialCompare={initialCompare} />
     </HydrationGuard>
   );

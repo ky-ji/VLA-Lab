@@ -8,7 +8,7 @@ function runHref(run) {
 
 export default function RunTable({ runs, showProject = true }) {
   if (!runs || runs.length === 0) {
-    return <div className="empty-panel">还没有可显示的 run。</div>;
+    return <div className="empty-panel">暂无可显示的运行记录</div>;
   }
 
   return (
@@ -16,13 +16,13 @@ export default function RunTable({ runs, showProject = true }) {
       <table className="data-table">
         <thead>
           <tr>
-            <th>Run</th>
-            {showProject ? <th>Project</th> : null}
-            <th>Model</th>
-            <th>Task</th>
-            <th>Steps</th>
-            <th>Total Avg</th>
-            <th>Updated</th>
+            <th>运行名称</th>
+            {showProject ? <th>项目</th> : null}
+            <th>模型</th>
+            <th>任务</th>
+            <th>步数</th>
+            <th>平均延迟</th>
+            <th>更新时间</th>
           </tr>
         </thead>
         <tbody>
@@ -35,7 +35,7 @@ export default function RunTable({ runs, showProject = true }) {
               </td>
               {showProject ? <td>{run.project}</td> : null}
               <td>{formatShortText(run.model_name || "unknown", 26)}</td>
-              <td>{formatShortText(run.task_name || "unknown", 32)}</td>
+              <td>{formatShortText(run.task_name || "--", 32)}</td>
               <td>{run.total_steps ?? 0}</td>
               <td>{formatMs(run.latency?.total_latency?.avg_ms)}</td>
               <td>{formatDate(run.updated_at)}</td>

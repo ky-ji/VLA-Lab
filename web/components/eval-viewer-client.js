@@ -94,6 +94,7 @@ export default function EvalViewerClient() {
     if (source === "demo") {
       loadEval("demo", "", "", "");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadEval is intentionally unstable
   }, [source]);
 
   async function handleUpload(file) {

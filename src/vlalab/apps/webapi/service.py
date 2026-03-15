@@ -30,7 +30,8 @@ def get_runs_dir(dir_override: Optional[str] = None) -> Path:
     return vlalab.get_runs_dir(dir_override).resolve()
 
 
-def _stat_signature(path: Path) -> Tuple[int, int]:
+def stat_signature(path: Path) -> Tuple[int, int]:
+    """Return a cheap (mtime_ns, size) pair for cache-key use."""
     try:
         stat = path.stat()
     except FileNotFoundError:
@@ -39,7 +40,7 @@ def _stat_signature(path: Path) -> Tuple[int, int]:
 
 
 @lru_cache(maxsize=1024)
-def _read_json_cached(path_str: str, mtime_ns: int, size: int) -> Dict[str, Any]:
+def read_json_cached(path_str: str, mtime_ns: int, size: int) -> Dict[str, Any]:
     if not mtime_ns or not size:
         return {}
     with open(path_str, "r") as f:
@@ -56,12 +57,12 @@ def _read_jsonl_cached(path_str: str, mtime_ns: int, size: int) -> Tuple[Dict[st
 
 def load_meta(run_path: Path) -> Dict[str, Any]:
     meta_path = run_path / "meta.json"
-    return _read_json_cached(str(meta_path), *_stat_signature(meta_path))
+    return read_json_cached(str(meta_path), *stat_signature(meta_path))
 
 
 def load_steps(run_path: Path) -> List[Dict[str, Any]]:
     steps_path = run_path / "steps.jsonl"
-    return list(_read_jsonl_cached(str(steps_path), *_stat_signature(steps_path)))
+    return list(_read_jsonl_cached(str(steps_path), *stat_signature(steps_path)))
 
 
 def _iter_run_paths(runs_dir: Path, project: Optional[str] = None) -> List[Path]:
@@ -90,6 +91,11 @@ def list_projects(runs_dir: Path) -> List[str]:
     return vlalab.list_projects(dir=str(runs_dir))
 
 
+def count_runs(runs_dir: Path) -> int:
+    """Count total runs without loading metadata (fast directory scan)."""
+    return len(_iter_run_paths(runs_dir))
+
+
 def _matches_search(meta: Dict[str, Any], run_path: Path, search: Optional[str]) -> bool:
     if not search:
         return True
@@ -110,7 +116,7 @@ def _iso_from_timestamp(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).isoformat()
 
 
-def _latency_ms(timing: Dict[str, Any], key_base: str) -> Optional[float]:
+def latency_ms(timing: Dict[str, Any], key_base: str) -> Optional[float]:
     ms_key = f"{key_base}_ms"
     if ms_key in timing and timing[ms_key] is not None:
         return float(timing[ms_key])
@@ -119,7 +125,7 @@ def _latency_ms(timing: Dict[str, Any], key_base: str) -> Optional[float]:
     return None
 
 
-def _summarize_metric(values: Sequence[Optional[float]]) -> LatencyMetric:
+def summarize_metric(values: Sequence[Optional[float]]) -> LatencyMetric:
     filtered = np.asarray([value for value in values if value is not None], dtype=float)
     if filtered.size == 0:
         return LatencyMetric()
@@ -130,23 +136,23 @@ def _summarize_metric(values: Sequence[Optional[float]]) -> LatencyMetric:
     )
 
 
-def _timing_summary(steps: Sequence[Dict[str, Any]]) -> Dict[str, LatencyMetric]:
+def timing_summary(steps: Sequence[Dict[str, Any]]) -> Dict[str, LatencyMetric]:
     transport = []
     inference = []
     total = []
     for step in steps:
         timing = step.get("timing", {})
-        transport.append(_latency_ms(timing, "transport_latency"))
-        inference.append(_latency_ms(timing, "inference_latency"))
-        total.append(_latency_ms(timing, "total_latency"))
+        transport.append(latency_ms(timing, "transport_latency"))
+        inference.append(latency_ms(timing, "inference_latency"))
+        total.append(latency_ms(timing, "total_latency"))
     return {
-        "transport_latency": _summarize_metric(transport),
-        "inference_latency": _summarize_metric(inference),
-        "total_latency": _summarize_metric(total),
+        "transport_latency": summarize_metric(transport),
+        "inference_latency": summarize_metric(inference),
+        "total_latency": summarize_metric(total),
     }
 
 
-def _build_run_summary(
+def build_run_summary(
     run_path: Path,
     meta: Optional[Dict[str, Any]] = None,
     steps: Optional[Sequence[Dict[str, Any]]] = None,
@@ -175,7 +181,7 @@ def _build_run_summary(
         inference_freq=meta.get("inference_freq"),
     )
     if include_latency and steps is not None:
-        summary.latency = _timing_summary(steps)
+        summary.latency = timing_summary(steps)
     return summary
 
 
@@ -193,7 +199,7 @@ def list_run_summaries(
             continue
         steps = load_steps(run_path) if include_latency else None
         items.append(
-            _build_run_summary(
+            build_run_summary(
                 run_path,
                 meta=meta,
                 steps=steps,
@@ -215,7 +221,7 @@ def resolve_run_path(runs_dir: Path, project: str, run_name: str) -> Path:
     return run_path
 
 
-def _image_url(project: str, run_name: str, image_path: str) -> str:
+def image_url(project: str, run_name: str, image_path: str) -> str:
     return f"/api/runs/{project}/{run_name}/artifacts/{image_path}"
 
 
@@ -234,7 +240,7 @@ def _step_preview(project: str, run_name: str, step: Dict[str, Any]) -> StepPrev
         CameraImage(
             camera_name=img.get("camera_name", "default"),
             path=img.get("path", ""),
-            url=_image_url(project, run_name, img.get("path", "")),
+            url=image_url(project, run_name, img.get("path", "")),
             shape=img.get("shape"),
             encoding=img.get("encoding"),
         )
@@ -249,9 +255,9 @@ def _step_preview(project: str, run_name: str, step: Dict[str, Any]) -> StepPrev
         action_preview=action_preview,
         action_chunk_size=len(values),
         timing={
-            "transport_latency_ms": _latency_ms(timing, "transport_latency"),
-            "inference_latency_ms": _latency_ms(timing, "inference_latency"),
-            "total_latency_ms": _latency_ms(timing, "total_latency"),
+            "transport_latency_ms": latency_ms(timing, "transport_latency"),
+            "inference_latency_ms": latency_ms(timing, "inference_latency"),
+            "total_latency_ms": latency_ms(timing, "total_latency"),
         },
         images=images,
         tags=step.get("tags", {}),
@@ -267,7 +273,7 @@ def load_run_detail(
     run_path = resolve_run_path(runs_dir, project, run_name)
     meta = load_meta(run_path)
     steps = load_steps(run_path)
-    summary = _build_run_summary(run_path, meta=meta, steps=steps, include_latency=True)
+    summary = build_run_summary(run_path, meta=meta, steps=steps, include_latency=True)
 
     cameras = list(meta.get("cameras") or [])
     camera_names: List[str] = []
@@ -291,7 +297,7 @@ def load_run_detail(
         task_prompt=meta.get("task_prompt"),
         state_dim=state_dim,
         cameras=camera_names,
-        timing_summary=_timing_summary(steps),
+        timing_summary=timing_summary(steps),
         recent_steps=recent,
         extra=meta.get("extra", {}),
     )
@@ -352,18 +358,18 @@ def build_latency_compare(
         run_path = resolve_run_path(runs_dir, project, run_name)
         meta = load_meta(run_path)
         steps = load_steps(run_path)
-        summary = _build_run_summary(run_path, meta=meta, steps=steps, include_latency=True)
+        summary = build_run_summary(run_path, meta=meta, steps=steps, include_latency=True)
 
         step_indices = [int(step.get("step_idx", idx)) for idx, step in enumerate(steps)]
-        transport = [_latency_ms(step.get("timing", {}), "transport_latency") for step in steps]
-        inference = [_latency_ms(step.get("timing", {}), "inference_latency") for step in steps]
-        total = [_latency_ms(step.get("timing", {}), "total_latency") for step in steps]
+        transport = [latency_ms(step.get("timing", {}), "transport_latency") for step in steps]
+        inference = [latency_ms(step.get("timing", {}), "inference_latency") for step in steps]
+        total = [latency_ms(step.get("timing", {}), "total_latency") for step in steps]
 
         sampled_steps = _downsample_steps(step_indices, max_points=max_points)
         items.append(
             LatencyCompareItem(
                 run=summary,
-                summary=_timing_summary(steps),
+                summary=timing_summary(steps),
                 series=LatencySeries(
                     steps=sampled_steps,
                     transport_latency_ms=_downsample(transport, max_points=max_points),

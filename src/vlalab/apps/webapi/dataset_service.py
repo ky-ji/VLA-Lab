@@ -4,19 +4,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 
 from .media import image_to_data_url, normalize_image
-
-
-def _stat_signature(path: Path) -> Tuple[int, int]:
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
-        return 0, 0
-    return stat.st_mtime_ns, stat.st_size
+from .service import stat_signature
 
 
 @lru_cache(maxsize=16)
@@ -26,11 +19,11 @@ def _open_zarr_cached(path_str: str, mtime_ns: int, size: int):
     return zarr.open(path_str, mode="r")
 
 
-def _open_dataset(path: str | Path):
+def _open_dataset(path: Union[str, Path]):
     dataset_path = Path(path).expanduser().resolve()
     if not dataset_path.exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
-    return dataset_path, _open_zarr_cached(str(dataset_path), *_stat_signature(dataset_path))
+    return dataset_path, _open_zarr_cached(str(dataset_path), *stat_signature(dataset_path))
 
 
 def _classify_keys(root) -> Tuple[List[str], List[str]]:
@@ -45,7 +38,7 @@ def _classify_keys(root) -> Tuple[List[str], List[str]]:
     return image_keys, lowdim_keys
 
 
-def inspect_dataset(path: str | Path) -> Dict[str, Any]:
+def inspect_dataset(path: Union[str, Path]) -> Dict[str, Any]:
     dataset_path, root = _open_dataset(path)
     image_keys, lowdim_keys = _classify_keys(root)
     episode_ends = root["meta"]["episode_ends"][:]
@@ -79,7 +72,7 @@ def _safe_series(values: np.ndarray) -> List[float]:
 
 
 def load_dataset_episode_view(
-    path: str | Path,
+    path: Union[str, Path],
     episode_idx: int,
     step_idx: int = 0,
     step_interval: int = 5,

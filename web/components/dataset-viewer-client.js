@@ -6,8 +6,7 @@ import { browserFetchJson } from "@/lib/api";
 import { formatNumber } from "@/lib/format";
 import { LineChart, SimpleTabs, TrajectoryProjection } from "@/components/chart-kit";
 
-const DEFAULT_DATASET_PATH =
-  "/data0/vla-data/processed/Diffusion_Policy/data/001_assembly_chocolate/assembly_chocolate_300.zarr";
+const DEFAULT_DATASET_PATH = "";
 
 export default function DatasetViewerClient() {
   const [datasetPath, setDatasetPath] = useState(DEFAULT_DATASET_PATH);

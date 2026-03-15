@@ -111,18 +111,13 @@ function VectorTable({ title, labels = [], values = [] }) {
 
   return (
     <div className="section-panel compact-panel">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Vector</p>
-          <h2>{title}</h2>
-        </div>
-      </div>
+      <p className="panel-title">{title}</p>
       <div className="table-shell">
         <table className="data-table compact-table">
           <thead>
             <tr>
-              <th>Dim</th>
-              <th>Value</th>
+              <th>维度</th>
+              <th>数值</th>
             </tr>
           </thead>
           <tbody>
@@ -148,12 +143,7 @@ function ValueBarList({ title, labels = [], values = [] }) {
 
   return (
     <div className="section-panel compact-panel">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">First Action</p>
-          <h2>{title}</h2>
-        </div>
-      </div>
+      <p className="panel-title">{title}</p>
       <div className="value-bar-list">
         {values.map((value, idx) => {
           const width = `${(Math.abs(value || 0) / maxAbs) * 100}%`;
@@ -189,7 +179,7 @@ function StepImages({ images, selectedCamera, onCameraChange, title = "当前观
     <div className="section-panel">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Vision</p>
+          <p className="eyebrow">视觉</p>
           <h2>{title}</h2>
         </div>
       </div>
@@ -218,31 +208,54 @@ function StepImages({ images, selectedCamera, onCameraChange, title = "当前观
   );
 }
 
-function StepFilmstrip({ steps, nearbySteps, currentStepIdx, onSelect }) {
+function StepFilmstrip({ steps, nearbySteps, currentStepIdx, onSelect, cameras = [], filmstripCamera, onCameraChange }) {
+  function imageForStep(step) {
+    if (!step?.images?.length) return null;
+    if (!filmstripCamera) return step.images[0];
+    return step.images.find((img) => img.camera_name === filmstripCamera) || step.images[0];
+  }
+
   return (
-    <div className="thumbnail-strip">
-      {nearbySteps.map((idx) => {
-        const step = steps[idx];
-        const preview = firstImageForStep(step);
-        return (
-          <button
-            key={`thumb-${idx}`}
-            type="button"
-            className={`thumbnail-card${idx === currentStepIdx ? " is-active" : ""}`}
-            onClick={() => onSelect(idx)}
-          >
-            {preview ? (
-              <img src={toPublicApiUrl(preview.url)} alt={`step-${idx}`} />
-            ) : (
-              <div className="thumbnail-empty">No image</div>
-            )}
-            <div className="thumbnail-meta">
-              <strong>Step {idx}</strong>
-              <span>{formatMs(step?.timing?.total_latency_ms)}</span>
-            </div>
-          </button>
-        );
-      })}
+    <div className="filmstrip-shell">
+      {cameras.length > 1 ? (
+        <div className="filmstrip-camera-bar">
+          <span className="filmstrip-camera-label">胶片视角</span>
+          {cameras.map((cam) => (
+            <button
+              key={cam}
+              type="button"
+              className={`camera-pill${filmstripCamera === cam ? " is-active" : ""}`}
+              onClick={() => onCameraChange(cam)}
+            >
+              {cam}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="thumbnail-strip">
+        {nearbySteps.map((idx) => {
+          const step = steps[idx];
+          const preview = imageForStep(step);
+          return (
+            <button
+              key={`thumb-${idx}`}
+              type="button"
+              className={`thumbnail-card${idx === currentStepIdx ? " is-active" : ""}`}
+              onClick={() => onSelect(idx)}
+            >
+              {preview ? (
+                <img src={toPublicApiUrl(preview.url)} alt={`step-${idx}`} />
+              ) : (
+                <div className="thumbnail-empty">无图像</div>
+              )}
+              <div className="thumbnail-meta">
+                <strong>步 {idx}</strong>
+                <span>{formatMs(step?.timing?.total_latency_ms)}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -265,18 +278,18 @@ function AttentionCompareGrid({ sourceImages = [], overlays = [] }) {
           <article key={camera} className="attention-compare-card">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Camera</p>
+                <p className="eyebrow">相机</p>
                 <h2>{camera}</h2>
               </div>
             </div>
             <div className="attention-pair">
               <figure>
-                {source ? <img src={toPublicApiUrl(source.url)} alt={`${camera}-source`} /> : <div className="thumbnail-empty">No source</div>}
+                {source ? <img src={toPublicApiUrl(source.url)} alt={`${camera}-source`} /> : <div className="thumbnail-empty">无源图</div>}
                 <figcaption>原始图像</figcaption>
               </figure>
               <figure>
-                {overlay ? <img src={toPublicApiUrl(overlay.overlay_url)} alt={`${camera}-overlay`} /> : <div className="thumbnail-empty">No overlay</div>}
-                <figcaption>Attention overlay</figcaption>
+                {overlay ? <img src={toPublicApiUrl(overlay.overlay_url)} alt={`${camera}-overlay`} /> : <div className="thumbnail-empty">无叠加图</div>}
+                <figcaption>Attention 叠加</figcaption>
               </figure>
             </div>
           </article>
@@ -305,6 +318,7 @@ export default function RunReplayClient({ replay, project, runName }) {
   const [isLoadingAttention, setIsLoadingAttention] = useState(false);
   const [isGeneratingAttention, setIsGeneratingAttention] = useState(false);
   const [attentionReloadKey, setAttentionReloadKey] = useState(0);
+  const [filmstripCamera, setFilmstripCamera] = useState("");
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -315,6 +329,7 @@ export default function RunReplayClient({ replay, project, runName }) {
   const maxStep = Math.max(0, steps.length - 1);
   const currentBoundary = currentChunkBoundary(replay.expanded_execution, stepIdx);
   const nearbySteps = stepWindow(stepIdx, maxStep, 5);
+  const allCameras = useMemo(() => replay.camera_names || [], [replay.camera_names]);
   const currentExecution = useMemo(() => executionRows(replay, currentBoundary), [replay, currentBoundary]);
   const playbackOptions = [
     { label: "慢", value: 500 },
@@ -351,10 +366,10 @@ export default function RunReplayClient({ replay, project, runName }) {
       }
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        jumpToStep(stepIdx - 1);
+        startTransition(() => setStepIdx((prev) => clamp(prev - 1, 0, maxStep)));
       } else if (event.key === "ArrowRight") {
         event.preventDefault();
-        jumpToStep(stepIdx + 1);
+        startTransition(() => setStepIdx((prev) => clamp(prev + 1, 0, maxStep)));
       } else if (event.key === " ") {
         event.preventDefault();
         setIsPlaying((value) => !value);
@@ -363,7 +378,7 @@ export default function RunReplayClient({ replay, project, runName }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [stepIdx]);
+  }, [maxStep, startTransition]);
 
   useEffect(() => {
     if (activeTab !== "attention") {
@@ -449,88 +464,90 @@ export default function RunReplayClient({ replay, project, runName }) {
           <div>
             <p className="eyebrow">{summary.project}</p>
             <h1>{summary.run_name}</h1>
-            <p>{meta.task_prompt || summary.task_name || "No task prompt"}</p>
+            <p className="hero-desc">{meta.task_prompt || summary.task_name || "--"}</p>
           </div>
-          <div className="chip-row">
-            <span className="chip">{summary.model_name || "unknown model"}</span>
-            <span className="chip">{summary.total_steps ?? 0} steps</span>
-            <span className="chip">{summary.inference_freq ?? "--"} Hz</span>
-            <span className="chip">{formatDate(summary.updated_at)}</span>
+          <div className="run-meta-grid">
+            <div className="run-meta-item">
+              <span className="run-meta-label">模型</span>
+              <span className="run-meta-value">{summary.model_name || "unknown"}</span>
+            </div>
+            <div className="run-meta-item">
+              <span className="run-meta-label">步数</span>
+              <span className="run-meta-value">{summary.total_steps ?? 0}</span>
+            </div>
+            {summary.inference_freq ? (
+              <div className="run-meta-item">
+                <span className="run-meta-label">频率</span>
+                <span className="run-meta-value">{summary.inference_freq} Hz</span>
+              </div>
+            ) : null}
+            {summary.action_dim ? (
+              <div className="run-meta-item">
+                <span className="run-meta-label">动作维度</span>
+                <span className="run-meta-value">{summary.action_dim}</span>
+              </div>
+            ) : null}
+            <div className="run-meta-item">
+              <span className="run-meta-label">更新</span>
+              <span className="run-meta-value">{formatDate(summary.updated_at)}</span>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="selection-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Replay</p>
-            <h2>Step 选择、跳转与自动播放</h2>
-          </div>
-        </div>
-        <div className="replay-controls replay-controls-wide">
-          <button type="button" onClick={() => jumpToStep(0)}>
-            首帧
-          </button>
-          <button type="button" onClick={() => jumpToStep(stepIdx - 1)}>
-            上一帧
-          </button>
-          <button type="button" onClick={() => setIsPlaying((value) => !value)}>
-            {isPlaying ? "暂停" : "播放"}
-          </button>
-          <input
-            type="range"
-            min="0"
-            max={maxStep}
-            value={stepIdx}
-            onChange={(event) => jumpToStep(event.target.value)}
-          />
-          <input
-            type="number"
-            min="0"
-            max={maxStep}
-            value={stepInput}
-            onChange={(event) => setStepInput(event.target.value)}
-            onBlur={() => jumpToStep(stepInput)}
-          />
-          <select value={playbackMs} onChange={(event) => setPlaybackMs(Number(event.target.value))}>
-            {playbackOptions.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <button type="button" onClick={() => jumpToStep(stepIdx + 1)}>
-            下一帧
-          </button>
-          <button type="button" onClick={() => jumpToStep(maxStep)}>
-            末帧
-          </button>
-          <span className="range-readout">
-            Step {stepIdx} / {maxStep}
-          </span>
-        </div>
-        <div className="step-strip">
-          {nearbySteps.map((idx) => {
-            const step = steps[idx];
-            const totalLatency = step?.timing?.total_latency_ms;
-            return (
-              <button
-                key={idx}
-                type="button"
-                className={`step-token${idx === stepIdx ? " is-active" : ""}`}
-                onClick={() => jumpToStep(idx)}
-              >
-                <strong>{idx}</strong>
-                <span>{formatMs(totalLatency)}</span>
+        <div className="replay-toolbar">
+          <div className="replay-row-main">
+            <div className="replay-btn-group">
+              <button type="button" className="replay-btn" onClick={() => jumpToStep(0)} title="首帧">⏮</button>
+              <button type="button" className="replay-btn" onClick={() => jumpToStep(stepIdx - 1)} title="上一帧">◀</button>
+              <button type="button" className="replay-btn replay-btn-play" onClick={() => setIsPlaying((v) => !v)}>
+                {isPlaying ? "⏸" : "▶"}
               </button>
-            );
-          })}
+              <button type="button" className="replay-btn" onClick={() => jumpToStep(stepIdx + 1)} title="下一帧">▶</button>
+              <button type="button" className="replay-btn" onClick={() => jumpToStep(maxStep)} title="末帧">⏭</button>
+            </div>
+            <input
+              type="range"
+              className="replay-slider"
+              min="0"
+              max={maxStep}
+              value={stepIdx}
+              onChange={(event) => jumpToStep(event.target.value)}
+            />
+            <span className="replay-readout">{stepIdx} / {maxStep}</span>
+          </div>
+          <div className="replay-row-options">
+            <label className="replay-option">
+              <span>跳转</span>
+              <input
+                type="number"
+                min="0"
+                max={maxStep}
+                value={stepInput}
+                onChange={(event) => setStepInput(event.target.value)}
+                onBlur={() => jumpToStep(stepInput)}
+              />
+            </label>
+            <label className="replay-option">
+              <span>速度</span>
+              <select value={playbackMs} onChange={(event) => setPlaybackMs(Number(event.target.value))}>
+                {playbackOptions.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <span className="muted replay-hint">快捷键: ← → 切帧 · 空格播放</span>
+          </div>
         </div>
         <StepFilmstrip
           steps={steps}
           nearbySteps={nearbySteps}
           currentStepIdx={stepIdx}
           onSelect={jumpToStep}
+          cameras={allCameras}
+          filmstripCamera={filmstripCamera || allCameras[0] || ""}
+          onCameraChange={setFilmstripCamera}
         />
         <SimpleTabs
           activeTab={activeTab}
@@ -547,125 +564,147 @@ export default function RunReplayClient({ replay, project, runName }) {
 
       {activeTab === "replay" ? (
         <>
+          {/* 第一行：视觉观测 + 当前帧指标 */}
           <section className="detail-grid">
-            <div className="section-stack">
-              <StepImages
-                images={currentStep.images || []}
-                selectedCamera={selectedCamera}
-                onCameraChange={setSelectedCamera}
-                title="模型视觉观测"
-              />
-              <div className="section-panel">
-                <div className="section-heading">
-                  <div>
-                    <p className="eyebrow">Planning</p>
-                    <h2>3D 动作规划</h2>
-                  </div>
+            <StepImages
+              images={currentStep.images || []}
+              selectedCamera={selectedCamera}
+              onCameraChange={setSelectedCamera}
+              title="视觉观测"
+            />
+            <div className="section-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">当前帧</p>
+                  <h2>延迟、提示词与时间线</h2>
                 </div>
-                <TrajectoryProjection
-                  title="History + prediction"
-                  currentPoint={currentStep.state}
-                  series={[
-                    {
-                      name: "History",
-                      color: "#4b5563",
-                      points: replay.states.slice(0, stepIdx + 1),
-                    },
-                    {
-                      name: "Prediction",
-                      color: "#dc2626",
-                      dashed: true,
-                      points: currentStep.action_chunk,
-                    },
-                  ]}
-                />
+                <span className="frame-badge">步 {stepIdx}</span>
               </div>
-              <section className="detail-grid">
+
+              {/* 延迟三卡片 —— 带颜色区分 */}
+              <div className="latency-trio">
+                <div className="latency-kpi accent-amber">
+                  <span className="latency-kpi-label">传输</span>
+                  <strong className="latency-kpi-value">{formatMs(currentStep.timing?.transport_latency_ms)}</strong>
+                </div>
+                <div className="latency-kpi accent-blue">
+                  <span className="latency-kpi-label">推理</span>
+                  <strong className="latency-kpi-value">{formatMs(currentStep.timing?.inference_latency_ms)}</strong>
+                </div>
+                <div className="latency-kpi accent-teal">
+                  <span className="latency-kpi-label">总计</span>
+                  <strong className="latency-kpi-value">{formatMs(currentStep.timing?.total_latency_ms)}</strong>
+                </div>
+              </div>
+
+              {/* 结构化元数据 */}
+              <dl className="step-meta-list">
+                <div className="step-meta-row">
+                  <dt>提示词</dt>
+                  <dd>{currentStep.prompt || meta.task_prompt || "--"}</dd>
+                </div>
+                {Object.keys(currentStep.tags || {}).length ? (
+                  <div className="step-meta-row">
+                    <dt>标签</dt>
+                    <dd className="mono-text">{JSON.stringify(currentStep.tags)}</dd>
+                  </div>
+                ) : null}
+                <div className="step-meta-row">
+                  <dt>状态快照</dt>
+                  <dd className="mono-text">{vectorText(currentStep.state, replay.state_labels)}</dd>
+                </div>
+                <div className="step-meta-row">
+                  <dt>首个动作</dt>
+                  <dd className="mono-text">{vectorText(currentStep.action_preview, replay.action_labels)}</dd>
+                </div>
+              </dl>
+
+              <TimelineEvents events={currentStep.timeline_events} />
+            </div>
+          </section>
+
+          {/* 第二行：3D 规划 + 动作块 */}
+          <section className="detail-grid">
+            <div className="section-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">规划</p>
+                  <h2>3D 动作轨迹</h2>
+                </div>
+              </div>
+              <TrajectoryProjection
+                title="历史轨迹 + 预测"
+                currentPoint={currentStep.state}
+                series={[
+                  {
+                    name: "历史",
+                    color: "#4b5563",
+                    points: replay.states.slice(0, stepIdx + 1),
+                  },
+                  {
+                    name: "预测",
+                    color: "#dc2626",
+                    dashed: true,
+                    points: currentStep.action_chunk,
+                  },
+                ]}
+              />
+              <section className="detail-grid" style={{ marginTop: "16px" }}>
                 <VectorTable title="当前状态" labels={replay.state_labels} values={currentStep.state || []} />
                 <VectorTable title="首个执行动作" labels={replay.action_labels} values={currentStep.action_preview || []} />
               </section>
             </div>
 
-            <div className="section-stack">
-              <div className="section-panel">
-                <div className="section-heading">
-                  <div>
-                    <p className="eyebrow">Current Step</p>
-                    <h2>状态、提示词与时间线</h2>
-                  </div>
+            <div className="section-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">动作块</p>
+                  <h2>当前推理窗口</h2>
                 </div>
-                <div className="timing-grid">
-                  <div className="kpi-card">
-                    <span className="stat-label">Transport</span>
-                    <strong>{formatMs(currentStep.timing?.transport_latency_ms)}</strong>
-                  </div>
-                  <div className="kpi-card">
-                    <span className="stat-label">Inference</span>
-                    <strong>{formatMs(currentStep.timing?.inference_latency_ms)}</strong>
-                  </div>
-                  <div className="kpi-card">
-                    <span className="stat-label">Total</span>
-                    <strong>{formatMs(currentStep.timing?.total_latency_ms)}</strong>
-                  </div>
-                </div>
-                <div className="meta-panel">
-                  <div>
-                    <span className="stat-label">Prompt</span>
-                    <p>{currentStep.prompt || meta.task_prompt || "--"}</p>
-                  </div>
-                  <div>
-                    <span className="stat-label">Tags</span>
-                    <p>{Object.keys(currentStep.tags || {}).length ? JSON.stringify(currentStep.tags) : "--"}</p>
-                  </div>
-                  <div>
-                    <span className="stat-label">State Snapshot</span>
-                    <p>{vectorText(currentStep.state, replay.state_labels)}</p>
-                  </div>
-                  <div>
-                    <span className="stat-label">First Action</span>
-                    <p>{vectorText(currentStep.action_preview, replay.action_labels)}</p>
-                  </div>
-                </div>
-                <TimelineEvents events={currentStep.timeline_events} />
+                {currentStep.action_chunk?.length ? (
+                  <span className="frame-badge">
+                    {currentStep.action_chunk.length} 步 × {(currentStep.action_chunk[0] || []).length} 维
+                  </span>
+                ) : null}
               </div>
 
-              <div className="section-panel">
-                <div className="section-heading">
-                  <div>
-                    <p className="eyebrow">Chunk</p>
-                    <h2>动作块与当前执行窗口</h2>
+              {/* 热图全宽展示 */}
+              <HeatmapChart
+                matrix={chunkHeatmap(currentStep)}
+                rowLabels={replay.action_labels}
+                title={`步 ${stepIdx} · 动作块热图`}
+              />
+
+              {/* 首动作条形图 + 执行窗口并排 */}
+              <div className="chunk-bottom-grid">
+                <ValueBarList
+                  title="首个执行动作"
+                  labels={replay.action_labels}
+                  values={currentStep.action_preview || []}
+                />
+                {currentExecution.length ? (
+                  <div className="section-panel compact-panel">
+                    <p className="panel-title">执行窗口（步 {currentBoundary.start}–{currentBoundary.end - 1}）</p>
+                    <div className="table-shell">
+                      <table className="data-table compact-table">
+                        <thead>
+                          <tr>
+                            <th>执行步</th>
+                            <th>动作向量</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {currentExecution.map((row) => (
+                            <tr key={row.execStep}>
+                              <td>{row.execStep}</td>
+                              <td className="mono-text">{row.label}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-                <div className="detail-grid">
-                  <HeatmapChart
-                    matrix={chunkHeatmap(currentStep)}
-                    rowLabels={replay.action_labels}
-                    title={`Step ${stepIdx} action chunk`}
-                  />
-                  <ValueBarList
-                    title="首个执行动作条形图"
-                    labels={replay.action_labels}
-                    values={currentStep.action_preview || []}
-                  />
-                </div>
-                <div className="table-shell">
-                  <table className="data-table compact-table">
-                    <thead>
-                      <tr>
-                        <th>Exec Step</th>
-                        <th>Action Preview</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentExecution.map((row) => (
-                        <tr key={row.execStep}>
-                          <td>{row.execStep}</td>
-                          <td>{row.label}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                ) : null}
               </div>
             </div>
           </section>
@@ -673,8 +712,8 @@ export default function RunReplayClient({ replay, project, runName }) {
           <section className="section-panel">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Global Trends</p>
-                <h2>全局状态与动作趋势</h2>
+                <p className="eyebrow">全局趋势</p>
+                <h2>状态与动作时序曲线</h2>
               </div>
             </div>
             <SimpleTabs
@@ -740,21 +779,21 @@ export default function RunReplayClient({ replay, project, runName }) {
           <section className="selection-panel">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Attention</p>
+                <p className="eyebrow">注意力</p>
                 <h2>缓存浏览与离线生成</h2>
               </div>
             </div>
             <div className="control-grid">
               <label>
-                <span>Device</span>
+                <span>设备</span>
                 <input value={attentionDevice} onChange={(event) => setAttentionDevice(event.target.value)} placeholder="cuda:0" />
               </label>
               <label>
-                <span>Layer</span>
+                <span>层索引</span>
                 <input type="number" value={attentionLayer} onChange={(event) => setAttentionLayer(Number(event.target.value))} />
               </label>
               <label>
-                <span>Model Override</span>
+                <span>覆盖模型路径</span>
                 <input
                   value={attentionModelPath}
                   onChange={(event) => setAttentionModelPath(event.target.value)}
@@ -762,11 +801,11 @@ export default function RunReplayClient({ replay, project, runName }) {
                 />
               </label>
               <label>
-                <span>Prompt Override</span>
+                <span>覆盖提示词</span>
                 <input
                   value={attentionPrompt}
                   onChange={(event) => setAttentionPrompt(event.target.value)}
-                  placeholder="可选：覆盖 prompt"
+                  placeholder="可选：覆盖提示词"
                 />
               </label>
             </div>
@@ -798,8 +837,8 @@ export default function RunReplayClient({ replay, project, runName }) {
               <div className="section-panel">
                 <div className="section-heading">
                   <div>
-                    <p className="eyebrow">Cache Window</p>
-                    <h2>附近 Step 缓存状态</h2>
+              <p className="eyebrow">缓存窗口</p>
+                  <h2>附近步缓存状态</h2>
                   </div>
                 </div>
                 <div className="step-strip">
@@ -843,16 +882,16 @@ export default function RunReplayClient({ replay, project, runName }) {
               </div>
               <div className="meta-panel">
                 <div>
-                  <span className="stat-label">Resolved Model</span>
+                  <span className="stat-label">实际模型路径</span>
                   <PathText value={attentionData?.model_path || meta.model_path || "--"} />
                 </div>
                 <div>
-                  <span className="stat-label">Resolved Prompt</span>
+                  <span className="stat-label">实际提示词</span>
                   <p>{attentionData?.prompt || currentStep.prompt || meta.task_prompt || "--"}</p>
                 </div>
                 {attentionStdoutTail ? (
                   <div>
-                    <span className="stat-label">Generation Log</span>
+                    <span className="stat-label">生成日志</span>
                     <pre>{attentionStdoutTail}</pre>
                   </div>
                 ) : null}
@@ -863,8 +902,8 @@ export default function RunReplayClient({ replay, project, runName }) {
           <section className="section-panel">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Attention Overlays</p>
-                <h2>原图 / overlay 对照</h2>
+              <p className="eyebrow">Attention 叠加</p>
+              <h2>原图 / Overlay 对照</h2>
               </div>
             </div>
             <AttentionCompareGrid sourceImages={currentStep.images || []} overlays={attentionData?.overlays || []} />
@@ -875,29 +914,37 @@ export default function RunReplayClient({ replay, project, runName }) {
       {activeTab === "latency" ? (
         <section className="section-stack">
           <LineChart
-            title="Transport / inference / total latency"
+            title="传输 / 推理 / 总延迟趋势"
             markerIndex={stepIdx}
-            xLabel="X 轴: 推理步"
+            xLabel="推理步"
             series={[
-              { name: "Transport", values: replay.timing_series.transport_latency_ms, color: "#d97706" },
-              { name: "Inference", values: replay.timing_series.inference_latency_ms, color: "#2563eb" },
-              { name: "Total", values: replay.timing_series.total_latency_ms, color: "#6b7280" },
-              { name: "Interval", values: replay.timing_series.message_interval_ms, color: "#0f766e" },
+              { name: "传输", values: replay.timing_series.transport_latency_ms, color: "#d97706" },
+              { name: "推理", values: replay.timing_series.inference_latency_ms, color: "#2563eb" },
+              { name: "总计", values: replay.timing_series.total_latency_ms, color: "#6b7280" },
+              { name: "消息间隔", values: replay.timing_series.message_interval_ms, color: "#0f766e" },
             ]}
           />
           <section className="detail-grid">
             <div className="timing-grid">
-              {Object.entries(replay.latency_summary || {}).map(([key, value]) => (
-                <div key={key} className="kpi-card">
-                  <span className="stat-label">{key}</span>
-                  <strong>{formatMs(value?.avg_ms)}</strong>
-                  <span className="muted">
-                    P95 {formatMs(value?.p95_ms)} / Max {formatMs(value?.max_ms)}
-                  </span>
-                </div>
-              ))}
+              {Object.entries(replay.latency_summary || {}).map(([key, value]) => {
+                const labelMap = {
+                  transport_latency: "传输延迟",
+                  inference_latency: "推理延迟",
+                  total_latency: "总延迟",
+                  message_interval: "消息间隔",
+                };
+                return (
+                  <div key={key} className="kpi-card">
+                    <span className="stat-label">{labelMap[key] || key}</span>
+                    <strong>{formatMs(value?.avg_ms)}</strong>
+                    <span className="muted">
+                      P95 {formatMs(value?.p95_ms)} · 最大 {formatMs(value?.max_ms)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
-            <HistogramChart title="Total latency distribution" values={replay.timing_series.total_latency_ms} color="#475569" />
+            <HistogramChart title="总延迟分布直方图" values={replay.timing_series.total_latency_ms} color="#475569" />
           </section>
         </section>
       ) : null}
@@ -907,9 +954,9 @@ export default function RunReplayClient({ replay, project, runName }) {
           <section className="detail-grid">
             <div className="section-stack">
               <LineChart
-                title="Position over time"
+                title="末端位置随时间变化"
                 markerIndex={stepIdx}
-                xLabel="X 轴: 推理步"
+                xLabel="推理步"
                 series={[
                   { name: "x", values: replay.first_actions.map((row) => row?.[0] ?? null), color: "#0f766e" },
                   { name: "y", values: replay.first_actions.map((row) => row?.[1] ?? null), color: "#c2410c" },
@@ -917,21 +964,21 @@ export default function RunReplayClient({ replay, project, runName }) {
                 ]}
               />
               <LineChart
-                title="Action magnitude"
+                title="动作幅度"
                 markerIndex={stepIdx}
-                xLabel="X 轴: 推理步"
-                series={[{ name: "magnitude", values: positionMagnitude(replay.first_actions), color: "#7c3aed" }]}
+                xLabel="推理步"
+                series={[{ name: "幅度", values: positionMagnitude(replay.first_actions), color: "#7c3aed" }]}
               />
             </div>
             <div className="section-stack">
               {replay.action_labels?.includes("gripper") ? (
                 <LineChart
-                  title="Gripper over time"
+                  title="夹爪开合随时间变化"
                   markerIndex={stepIdx}
-                  xLabel="X 轴: 推理步"
+                  xLabel="推理步"
                   series={[
                     {
-                      name: "gripper",
+                      name: "夹爪",
                       values: replay.first_actions.map((row) => row?.[replay.action_labels.indexOf("gripper")] ?? null),
                       color: "#16a34a",
                     },
@@ -939,7 +986,7 @@ export default function RunReplayClient({ replay, project, runName }) {
                 />
               ) : null}
               <ValueBarList
-                title="当前 step 首动作"
+                title="当前帧首动作"
                 labels={replay.action_labels}
                 values={currentStep.action_preview || []}
               />
@@ -948,19 +995,19 @@ export default function RunReplayClient({ replay, project, runName }) {
           <section className="section-panel">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">Stats</p>
-                <h2>动作统计</h2>
+                <p className="eyebrow">统计</p>
+                <h2>动作维度统计</h2>
               </div>
             </div>
             <div className="table-shell">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Dim</th>
-                    <th>Mean</th>
-                    <th>Std</th>
-                    <th>Min</th>
-                    <th>Max</th>
+                    <th>维度</th>
+                    <th>均值</th>
+                    <th>标准差</th>
+                    <th>最小值</th>
+                    <th>最大值</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -986,39 +1033,39 @@ export default function RunReplayClient({ replay, project, runName }) {
             <div className="section-panel">
               <div className="section-heading">
                 <div>
-                  <p className="eyebrow">Model Config</p>
+                  <p className="eyebrow">配置</p>
                   <h2>部署与模型配置</h2>
                 </div>
               </div>
               <div className="timing-grid">
                 <div className="kpi-card">
-                  <span className="stat-label">Model Type</span>
-                  <strong>{meta.model_type || "unknown"}</strong>
+                  <span className="stat-label">模型类型</span>
+                  <strong>{meta.model_type || "未知"}</strong>
                 </div>
                 <div className="kpi-card">
-                  <span className="stat-label">Action Dim</span>
+                  <span className="stat-label">动作维度</span>
                   <strong>{summary.action_dim ?? "--"}</strong>
                 </div>
                 <div className="kpi-card">
-                  <span className="stat-label">Action Horizon</span>
+                  <span className="stat-label">动作步长</span>
                   <strong>{summary.action_horizon ?? "--"}</strong>
                 </div>
                 <div className="kpi-card">
-                  <span className="stat-label">Robot</span>
-                  <strong>{meta.robot_type || summary.robot_name || "unknown"}</strong>
+                  <span className="stat-label">机器人</span>
+                  <strong>{meta.robot_type || summary.robot_name || "未知"}</strong>
                 </div>
               </div>
               <div className="meta-panel">
                 <div>
-                  <span className="stat-label">Model Path</span>
+                  <span className="stat-label">模型路径</span>
                   <PathText value={meta.model_path || "--"} />
                 </div>
                 <div>
-                  <span className="stat-label">Task Prompt</span>
+                  <span className="stat-label">任务提示词</span>
                   <p>{meta.task_prompt || "--"}</p>
                 </div>
                 <div>
-                  <span className="stat-label">Cameras</span>
+                  <span className="stat-label">摄像头</span>
                   <p>{(replay.camera_names || []).join(", ") || "--"}</p>
                 </div>
               </div>
@@ -1029,7 +1076,7 @@ export default function RunReplayClient({ replay, project, runName }) {
             <div className="section-panel danger-panel">
               <div className="section-heading">
                 <div>
-                  <p className="eyebrow">Danger Zone</p>
+                  <p className="eyebrow">危险操作</p>
                   <h2>删除运行</h2>
                 </div>
               </div>
@@ -1049,8 +1096,8 @@ export default function RunReplayClient({ replay, project, runName }) {
               )}
             </div>
             <div className="meta-panel">
-              <span className="stat-label">Status</span>
-              <p>{isPending ? "正在切换 step..." : isPlaying ? "自动播放中" : "就绪"}</p>
+              <span className="stat-label">播放状态</span>
+              <p>{isPending ? "正在切换帧..." : isPlaying ? "自动播放中" : "就绪"}</p>
             </div>
           </div>
         </section>

@@ -19,141 +19,122 @@ export default async function HomePage() {
     <div className="section-stack">
       <section className="hero-panel">
         <div className="hero-copy">
-          <p className="eyebrow">Workspace Overview</p>
-          <h1>把常用排查入口放在一个更稳、更快的工作台里。</h1>
-          <p>
-            这里优先展示你最常看的状态：工作目录、最近运行、项目规模，以及 Runs / Latency / Dataset / Eval
-            四条主链路，减少来回翻页找入口的成本。
+          <p className="eyebrow">VLA-Lab Workspace</p>
+          <h1>VLA 部署<br />运维工作台</h1>
+          <p className="hero-desc">
+            统一管理推理日志、时延分析、数据集浏览与开环评估，减少排查成本。
           </p>
           <div className="hero-actions">
             <Link href="/runs" className="button-link">
-              打开 Runs
+              浏览 Runs
             </Link>
             <Link href="/latency" className="button-ghost">
-              查看 Latency
+              时延分析
             </Link>
-          </div>
-          <div className="feature-grid">
-            <div className="feature-card">
-              <h3>Runs 详情</h3>
-              <p>按项目浏览 run，进入 step 回放、attention 和动作轨迹分析。</p>
-            </div>
-            <div className="feature-card">
-              <h3>数据与评测</h3>
-              <p>Dataset workspace、open-loop eval 和可视化入口都收进同一套导航。</p>
-            </div>
           </div>
         </div>
         <aside className="hero-aside">
           <div className="metric-grid">
             <div className="metric-card">
-              <span className="stat-label">Runs Directory</span>
-              <div className="path-text" title={overview?.runs_dir ?? "--"}>
+              <span className="stat-label">工作目录</span>
+              <p className="path-text is-compact" title={overview?.runs_dir ?? "--"}>
                 {overview?.runs_dir ?? "--"}
-              </div>
+              </p>
             </div>
             <div className="metric-card">
-              <span className="stat-label">Projects</span>
+              <span className="stat-label">项目数</span>
               <strong>{overview?.project_count ?? 0}</strong>
             </div>
             <div className="metric-card">
-              <span className="stat-label">Runs</span>
+              <span className="stat-label">运行总数</span>
               <strong>{overview?.run_count ?? 0}</strong>
             </div>
           </div>
-          <div className="section-panel compact-panel overview-highlight">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Latest Run</p>
-                <h2>{latestRun ? latestRun.run_name : "暂无运行记录"}</h2>
-              </div>
-              {latestRun ? (
+          {latestRun ? (
+            <div className="section-panel compact-panel overview-highlight">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">最近一次运行</p>
+                  <h2>{latestRun.run_name}</h2>
+                </div>
                 <Link href={runHref(latestRun)} className="text-link">
-                  打开详情
+                  查看详情 →
                 </Link>
-              ) : null}
-            </div>
-            {latestRun ? (
+              </div>
               <div className="overview-list">
                 <div className="overview-row">
-                  <span className="stat-label">Project</span>
+                  <span className="stat-label">项目</span>
                   <strong>{latestRun.project}</strong>
                 </div>
                 <div className="overview-row">
-                  <span className="stat-label">Model</span>
-                  <span title={latestRun.model_name || "unknown"}>{formatShortText(latestRun.model_name || "unknown", 48)}</span>
+                  <span className="stat-label">模型</span>
+                  <span title={latestRun.model_name || "unknown"}>
+                    {formatShortText(latestRun.model_name || "unknown", 48)}
+                  </span>
                 </div>
                 <div className="overview-row">
-                  <span className="stat-label">Task</span>
-                  <span title={latestRun.task_name || "No task"}>{formatShortText(latestRun.task_name || "No task", 72)}</span>
+                  <span className="stat-label">任务</span>
+                  <span title={latestRun.task_name || "--"}>
+                    {formatShortText(latestRun.task_name || "--", 72)}
+                  </span>
                 </div>
                 <div className="overview-row">
-                  <span className="stat-label">Updated</span>
+                  <span className="stat-label">更新时间</span>
                   <span>{formatDate(latestRun.updated_at)}</span>
                 </div>
               </div>
-            ) : (
-              <p className="muted">当前 runs 目录里还没有可展示的运行结果。</p>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="empty-panel">当前目录暂无运行记录</div>
+          )}
         </aside>
       </section>
 
       <section className="section-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Quick Access</p>
-            <h2>常用入口</h2>
+            <p className="eyebrow">快捷入口</p>
+            <h2>核心功能</h2>
           </div>
         </div>
         <div className="feature-grid">
-          <div className="feature-card">
-            <h3>Inference Runs</h3>
-            <p>进入项目和 run 列表，快速切到具体 step、图像、轨迹和 attention 工作区。</p>
-            <Link href="/runs" className="text-link">
-              进入 Runs
-            </Link>
-          </div>
-          <div className="feature-card">
-            <h3>Latency Compare</h3>
-            <p>挑多个 run 做 transport / inference / total latency 的对比和分布分析。</p>
-            <Link href="/latency" className="text-link">
-              打开 Latency
-            </Link>
-          </div>
-          <div className="feature-card">
-            <h3>Dataset Workspace</h3>
-            <p>查看 episode 图像网格、动作序列和工作空间点云，不再整页 rerun。</p>
-            <Link href="/datasets" className="text-link">
-              打开 Datasets
-            </Link>
-          </div>
-          <div className="feature-card">
-            <h3>Eval Viewer</h3>
-            <p>读取目录或 JSON 结果，检查预测轨迹、误差分布和静态可视化图片。</p>
-            <Link href="/eval" className="text-link">
-              打开 Eval
-            </Link>
-          </div>
+          <Link href="/runs" className="feature-card feature-card-link">
+            <h3>推理日志</h3>
+            <p>浏览项目和 run 列表，逐帧回放、轨迹分析与 attention 可视化。</p>
+          </Link>
+          <Link href="/latency" className="feature-card feature-card-link">
+            <h3>时延对比</h3>
+            <p>多 run transport / inference / total 延迟对比与分布分析。</p>
+          </Link>
+          <Link href="/datasets" className="feature-card feature-card-link">
+            <h3>数据集浏览</h3>
+            <p>查看 episode 图像网格、动作序列和工作空间点云。</p>
+          </Link>
+          <Link href="/eval" className="feature-card feature-card-link">
+            <h3>开环评估</h3>
+            <p>读取目录或 JSON 结果，检查预测轨迹、误差分布和静态可视化。</p>
+          </Link>
         </div>
       </section>
 
-      <section className="section-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Latest</p>
-            <h2>最近的运行记录</h2>
+      {latestRuns.length > 0 ? (
+        <section className="section-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">最近运行</p>
+              <h2>最新 {latestRuns.length} 条记录</h2>
+            </div>
+            <Link href="/runs" className="text-link">
+              查看全部 →
+            </Link>
           </div>
-          <Link href="/runs" className="text-link">
-            See all runs
-          </Link>
-        </div>
-        <div className="run-card-grid">
-          {latestRuns.map((run) => (
-            <RunCard key={run.run_id} run={run} />
-          ))}
-        </div>
-      </section>
+          <div className="run-card-grid">
+            {latestRuns.map((run) => (
+              <RunCard key={run.run_id} run={run} />
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

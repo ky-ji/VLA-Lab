@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function DatasetsPage() {
   return (
-    <HydrationGuard label="正在加载数据集交互界面...">
+    <HydrationGuard label="正在加载数据集浏览器 ...">
       <DatasetViewerClient />
     </HydrationGuard>
   );

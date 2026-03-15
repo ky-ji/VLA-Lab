@@ -13,10 +13,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from .service import (
-    _build_run_summary,
-    _image_url,
-    _latency_ms,
-    _timing_summary,
+    build_run_summary,
+    image_url,
+    latency_ms,
+    timing_summary,
     load_meta,
     load_steps,
     resolve_run_path,
@@ -98,8 +98,8 @@ def _split_xyz_quat_gripper(dim_labels: List[str]) -> List[Dict[str, Any]]:
 
     return [
         {"key": "xyz", "title": "XYZ", "indices": xyz_indices},
-        {"key": "quat", "title": "姿态", "indices": quat_indices},
-        {"key": "gripper", "title": "夹爪", "indices": gripper_indices},
+        {"key": "quat", "title": "Orientation", "indices": quat_indices},
+        {"key": "gripper", "title": "Gripper", "indices": gripper_indices},
     ]
 
 
@@ -270,10 +270,10 @@ def _build_step_details(project: str, run_name: str, steps: List[Dict[str, Any]]
                 "action_chunk": [[float(v) for v in row] for row in values],
                 "action_preview": [float(v) for v in values[0]] if values else [],
                 "timing": {
-                    "transport_latency_ms": _latency_ms(timing, "transport_latency"),
-                    "inference_latency_ms": _latency_ms(timing, "inference_latency"),
-                    "total_latency_ms": _latency_ms(timing, "total_latency"),
-                    "message_interval_ms": _latency_ms(timing, "message_interval"),
+                    "transport_latency_ms": latency_ms(timing, "transport_latency"),
+                    "inference_latency_ms": latency_ms(timing, "inference_latency"),
+                    "total_latency_ms": latency_ms(timing, "total_latency"),
+                    "message_interval_ms": latency_ms(timing, "message_interval"),
                     "client_send": timing.get("client_send"),
                     "server_recv": timing.get("server_recv"),
                     "infer_start": timing.get("infer_start"),
@@ -285,7 +285,7 @@ def _build_step_details(project: str, run_name: str, steps: List[Dict[str, Any]]
                     {
                         "camera_name": image_ref.get("camera_name", "default"),
                         "path": image_ref.get("path", ""),
-                        "url": _image_url(project, run_name, image_ref.get("path", "")),
+                        "url": image_url(project, run_name, image_ref.get("path", "")),
                     }
                     for image_ref in obs.get("images", [])
                     if image_ref.get("path")
@@ -300,7 +300,7 @@ def load_run_replay(runs_dir: Path, project: str, run_name: str) -> Dict[str, An
     run_path = resolve_run_path(runs_dir, project, run_name)
     meta = load_meta(run_path)
     steps = load_steps(run_path)
-    summary = _build_run_summary(run_path, meta=meta, steps=steps, include_latency=True)
+    summary = build_run_summary(run_path, meta=meta, steps=steps, include_latency=True)
 
     extracted = _extract_state_action_data(steps, meta)
     states_arr = extracted["states_arr"]
@@ -308,10 +308,10 @@ def load_run_replay(runs_dir: Path, project: str, run_name: str) -> Dict[str, An
     action_labels = extracted["action_labels"]
 
     timing_series = {
-        "transport_latency_ms": [_latency_ms(step.get("timing", {}), "transport_latency") for step in steps],
-        "inference_latency_ms": [_latency_ms(step.get("timing", {}), "inference_latency") for step in steps],
-        "total_latency_ms": [_latency_ms(step.get("timing", {}), "total_latency") for step in steps],
-        "message_interval_ms": [_latency_ms(step.get("timing", {}), "message_interval") for step in steps],
+        "transport_latency_ms": [latency_ms(step.get("timing", {}), "transport_latency") for step in steps],
+        "inference_latency_ms": [latency_ms(step.get("timing", {}), "inference_latency") for step in steps],
+        "total_latency_ms": [latency_ms(step.get("timing", {}), "total_latency") for step in steps],
+        "message_interval_ms": [latency_ms(step.get("timing", {}), "message_interval") for step in steps],
     }
 
     cameras = meta.get("cameras", []) or []
@@ -341,7 +341,7 @@ def load_run_replay(runs_dir: Path, project: str, run_name: str) -> Dict[str, An
         "expanded_execution": _extract_expanded_execution_data(steps, action_labels),
         "latency_summary": {
             key: value.model_dump()
-            for key, value in _timing_summary(steps).items()
+            for key, value in timing_summary(steps).items()
         },
         "action_stats": _build_action_stats(actions_arr, action_labels),
         "step_details": _build_step_details(project, run_name, steps),
@@ -455,7 +455,7 @@ def load_attention_state(
         overlays.append(
             {
                 "camera_name": overlay.get("camera_name", "attention"),
-                "overlay_url": _image_url(project, run_name, str(relative)),
+                "overlay_url": image_url(project, run_name, str(relative)),
                 "overlay_path": str(relative),
                 "heatmap_npy_path": overlay.get("heatmap_npy_path"),
             }

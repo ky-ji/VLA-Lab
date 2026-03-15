@@ -7,19 +7,11 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from .service import _read_json_cached
-
-
-def _stat_signature(path: Path):
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
-        return 0, 0
-    return stat.st_mtime_ns, stat.st_size
+from .service import read_json_cached, stat_signature
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
-    return _read_json_cached(str(path), *_stat_signature(path))
+    return read_json_cached(str(path), *stat_signature(path))
 
 
 def _generate_demo_data() -> Dict[str, Any]:

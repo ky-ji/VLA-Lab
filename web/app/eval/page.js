@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function EvalPage() {
   return (
-    <HydrationGuard label="正在加载评估交互界面...">
+    <HydrationGuard label="正在加载评估界面 ...">
       <EvalViewerClient />
     </HydrationGuard>
   );
