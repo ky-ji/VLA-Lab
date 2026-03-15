@@ -122,6 +122,21 @@ def latency_ms(timing: Dict[str, Any], key_base: str) -> Optional[float]:
         return float(timing[ms_key])
     if key_base in timing and timing[key_base] is not None:
         return float(timing[key_base]) * 1000.0
+    if key_base == "total_latency":
+        transport = None
+        inference = None
+        if timing.get("transport_latency_ms") is not None:
+            transport = float(timing["transport_latency_ms"])
+        elif timing.get("transport_latency") is not None:
+            transport = float(timing["transport_latency"]) * 1000.0
+
+        if timing.get("inference_latency_ms") is not None:
+            inference = float(timing["inference_latency_ms"])
+        elif timing.get("inference_latency") is not None:
+            inference = float(timing["inference_latency"]) * 1000.0
+
+        if transport is not None or inference is not None:
+            return (transport or 0.0) + (inference or 0.0)
     return None
 
 
@@ -379,4 +394,3 @@ def build_latency_compare(
             )
         )
     return LatencyCompareResponse(items=items)
-

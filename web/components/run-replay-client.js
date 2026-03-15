@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { browserDelete, browserFetchJson, browserPostJson, toPublicApiUrl } from "@/lib/api";
 import { formatDate, formatMs, formatNumber, formatShortText } from "@/lib/format";
 import {
-  HeatmapChart,
   HistogramChart,
   LineChart,
   SimpleTabs,
@@ -42,13 +41,175 @@ function seriesForGroup(matrix, labels, group) {
   }));
 }
 
-function chunkHeatmap(step) {
-  const chunk = step?.action_chunk || [];
+function finiteNumbers(values = []) {
+  return values
+    .map((value) => (value === null || value === undefined || Number.isNaN(Number(value)) ? null : Number(value)))
+    .filter((value) => value !== null);
+}
+
+function meanValue(values = []) {
+  const valid = finiteNumbers(values);
+  if (!valid.length) {
+    return null;
+  }
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function percentileRank(values = [], target) {
+  if (target === null || target === undefined || Number.isNaN(Number(target))) {
+    return null;
+  }
+  const valid = finiteNumbers(values);
+  if (!valid.length) {
+    return null;
+  }
+  const belowOrEqual = valid.filter((value) => value <= Number(target)).length;
+  return (belowOrEqual / valid.length) * 100;
+}
+
+function signedNumber(value, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "--";
+  }
+  const number = Number(value);
+  return `${number > 0 ? "+" : ""}${number.toFixed(digits)}`;
+}
+
+function percentText(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "--";
+  }
+  return `${Math.round(Number(value))}%`;
+}
+
+function totalLatency(timing = {}) {
+  if (timing.total_latency_ms !== null && timing.total_latency_ms !== undefined) {
+    return timing.total_latency_ms;
+  }
+
+  const parts = [timing.transport_latency_ms, timing.inference_latency_ms].filter(
+    (value) => value !== null && value !== undefined && !Number.isNaN(Number(value))
+  );
+  if (!parts.length) {
+    return null;
+  }
+  return parts.reduce((sum, value) => sum + Number(value), 0);
+}
+
+function timingSnapshot(timing = {}) {
+  const transport = timing.transport_latency_ms ?? null;
+  const inference = timing.inference_latency_ms ?? null;
+  const total = totalLatency(timing);
+  const messageInterval = timing.message_interval_ms ?? null;
+  const gap =
+    total !== null && transport !== null && inference !== null
+      ? Math.max(total - transport - inference, 0)
+      : null;
+
+  return { transport, inference, total, messageInterval, gap };
+}
+
+function ratio(part, total) {
+  if (
+    part === null ||
+    part === undefined ||
+    total === null ||
+    total === undefined ||
+    Number(total) <= 0 ||
+    Number.isNaN(Number(part)) ||
+    Number.isNaN(Number(total))
+  ) {
+    return null;
+  }
+  return (Number(part) / Number(total)) * 100;
+}
+
+function latencyTone(value, summary = {}) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return { label: "No data", toneClass: "tone-muted" };
+  }
+  const p95 = summary?.p95_ms;
+  const avg = summary?.avg_ms;
+  if (p95 !== null && p95 !== undefined && Number(value) >= Number(p95)) {
+    return { label: "P95+", toneClass: "tone-bad" };
+  }
+  if (avg !== null && avg !== undefined && Number(value) >= Number(avg) * 1.18) {
+    return { label: "High", toneClass: "tone-warn" };
+  }
+  return { label: "Stable", toneClass: "tone-good" };
+}
+
+function latencyDriver(timing) {
+  const { transport, inference, gap } = timingSnapshot(timing);
+  const parts = [
+    { key: "transport", label: "传输", value: transport },
+    { key: "inference", label: "推理", value: inference },
+    { key: "gap", label: "等待", value: gap },
+  ].filter((item) => item.value !== null && item.value !== undefined);
+
+  if (!parts.length) {
+    return "当前步没有完整的时延数据。";
+  }
+
+  const main = parts.reduce((best, item) => (Number(item.value) > Number(best.value) ? item : best), parts[0]);
+  if (main.key === "transport") {
+    return "当前帧主要卡在传输链路，更像相机采集、编码、网络或 IPC 堵塞。";
+  }
+  if (main.key === "inference") {
+    return "当前帧主要卡在推理阶段，更像模型计算或前后处理拥塞。";
+  }
+  return "总时延高于主要阶段之和，说明链路里还有未显式记录的等待时间。";
+}
+
+function actionColor(label, index) {
+  const lower = String(label || "").toLowerCase();
+  if (lower === "x") return "#0f766e";
+  if (lower === "y") return "#c2410c";
+  if (lower === "z") return "#2563eb";
+  if (lower.includes("gripper") || lower.includes("grip") || lower.includes("hand")) return "#16a34a";
+  if (lower.startsWith("q") || lower.startsWith("r")) return "#7c3aed";
+  return pickColor(index);
+}
+
+function actionDimensionCards(chunk = [], labels = []) {
   if (!chunk.length) {
     return [];
   }
   const dimCount = chunk[0]?.length || 0;
-  return Array.from({ length: dimCount }, (_, dimIdx) => chunk.map((row) => row?.[dimIdx] ?? null));
+  return Array.from({ length: dimCount }, (_, idx) => {
+    const values = chunk.map((row) => row?.[idx] ?? null);
+    const valid = finiteNumbers(values);
+    const first = values[0] ?? null;
+    const last = values[values.length - 1] ?? null;
+    return {
+      label: labels[idx] || `dim_${idx}`,
+      color: actionColor(labels[idx], idx),
+      values,
+      first,
+      last,
+      delta:
+        first === null || last === null || first === undefined || last === undefined
+          ? null
+          : Number(last) - Number(first),
+      span: valid.length ? Math.max(...valid) - Math.min(...valid) : null,
+    };
+  });
+}
+
+function vectorMagnitude(values = [], take = 3) {
+  const slice = (values || []).slice(0, take);
+  if (!slice.length || slice.some((value) => value === null || value === undefined || Number.isNaN(Number(value)))) {
+    return null;
+  }
+  return Math.sqrt(slice.reduce((sum, value) => sum + Number(value) ** 2, 0));
+}
+
+function dominantActionCard(cards = []) {
+  const ranked = cards.filter((item) => item.span !== null && item.span !== undefined);
+  if (!ranked.length) {
+    return null;
+  }
+  return ranked.reduce((best, item) => (Number(item.span) > Number(best.span) ? item : best), ranked[0]);
 }
 
 function positionMagnitude(actions) {
@@ -72,18 +233,12 @@ function stepWindow(stepIdx, maxStep, radius = 4) {
 
 function executionRows(replay, boundary) {
   const actions = replay.expanded_execution?.expanded_actions || [];
-  const labels = replay.expanded_execution?.action_labels || replay.action_labels || [];
   const start = boundary?.start || 0;
   const end = boundary?.end || start;
   return actions.slice(start, end).map((row, index) => ({
     execStep: start + index,
     values: row,
-    label: vectorText(row, labels, Math.min(8, labels.length || 8)),
   }));
-}
-
-function firstImageForStep(step) {
-  return step?.images?.[0] || null;
 }
 
 function RawJson({ value }) {
@@ -161,6 +316,325 @@ function ValueBarList({ title, labels = [], values = [] }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function MiniTrend({ values = [], color = "#0f766e", activeIndex = null }) {
+  const width = 180;
+  const height = 54;
+  const padding = 6;
+  const valid = values
+    .map((value, index) => ({
+      value: value === null || value === undefined || Number.isNaN(Number(value)) ? null : Number(value),
+      index,
+    }))
+    .filter((item) => item.value !== null);
+
+  if (!valid.length) {
+    return <div className="mini-trend-empty">无趋势</div>;
+  }
+
+  const numbers = valid.map((item) => item.value);
+  const min = Math.min(...numbers);
+  const max = Math.max(...numbers);
+  const span = max - min || 1;
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - padding * 2;
+  const points = valid.map((item) => {
+    const x = padding + (usableWidth * item.index) / Math.max(values.length - 1, 1);
+    const y = height - padding - ((item.value - min) / span) * usableHeight;
+    return { x, y };
+  });
+  const pointText = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const activePoint =
+    activeIndex === null
+      ? null
+      : valid.find((item) => item.index === activeIndex);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="mini-trend">
+      <rect x="0" y="0" width={width} height={height} rx="14" fill="rgba(255,255,255,0.72)" />
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth="3"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        points={pointText}
+      />
+      {activePoint ? (
+        <circle
+          cx={padding + (usableWidth * activePoint.index) / Math.max(values.length - 1, 1)}
+          cy={height - padding - ((activePoint.value - min) / span) * usableHeight}
+          r="4"
+          fill={color}
+          stroke="white"
+          strokeWidth="2"
+        />
+      ) : null}
+    </svg>
+  );
+}
+
+function LatencyBreakdown({ timing }) {
+  const { transport, inference, gap, total } = timingSnapshot(timing);
+  const segments = [
+    { key: "transport", label: "传输", value: transport, className: "is-transport" },
+    { key: "inference", label: "推理", value: inference, className: "is-inference" },
+    { key: "gap", label: "等待", value: gap, className: "is-gap" },
+  ].filter((item) => item.value !== null && item.value !== undefined && Number(item.value) > 0);
+
+  if (!segments.length) {
+    return <div className="empty-panel">没有可分解的时延数据</div>;
+  }
+
+  return (
+    <div className="breakdown-shell">
+      <div className="breakdown-bar">
+        {segments.map((segment) => (
+          <span
+            key={segment.key}
+            className={`breakdown-segment ${segment.className}`}
+            style={{ flexGrow: Math.max(Number(segment.value), 1) }}
+            title={`${segment.label}: ${formatMs(segment.value)}`}
+          />
+        ))}
+      </div>
+      <div className="breakdown-legend">
+        {segments.map((segment) => (
+          <span key={segment.key} className="breakdown-legend-item">
+            <span className={`breakdown-dot ${segment.className}`} />
+            {segment.label} {formatMs(segment.value)} · {percentText(ratio(segment.value, total))}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NearbyLatencyBars({ rows = [], currentStepIdx, onSelect }) {
+  const maxValue = Math.max(1, ...rows.map((row) => row.total ?? 0));
+
+  if (!rows.length) {
+    return <div className="empty-panel">没有附近时延窗口</div>;
+  }
+
+  return (
+    <div className="nearby-latency-grid">
+      {rows.map((row) => (
+        <button
+          key={`latency-${row.stepIdx}`}
+          type="button"
+          className={`nearby-latency-card${row.stepIdx === currentStepIdx ? " is-active" : ""}`}
+          onClick={() => onSelect(row.stepIdx)}
+        >
+          <div
+            className="nearby-latency-bar"
+            style={{ height: `${24 + ((row.total ?? 0) / maxValue) * 60}px` }}
+          />
+          <strong>步 {row.stepIdx}</strong>
+          <span>{formatMs(row.total)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FrameDiagnosisPanel({
+  currentStep,
+  stepIdx,
+  nearbyLatencyRows,
+  latencySummary,
+  meta,
+  onSelectStep,
+}) {
+  const timing = timingSnapshot(currentStep.timing);
+  const totalStatus = latencyTone(timing.total, latencySummary?.total_latency);
+  const totalValues = nearbyLatencyRows.map((item) => item.total);
+  const totalAvg = latencySummary?.total_latency?.avg_ms ?? meanValue(totalValues);
+  const totalRank = percentileRank(totalValues, timing.total);
+  const promptText = currentStep.prompt || meta.task_prompt || "--";
+  const tags = Object.entries(currentStep.tags || {});
+  const cards = [
+    {
+      label: "总延迟",
+      value: formatMs(timing.total),
+      tone: totalStatus,
+      note:
+        totalAvg === null || totalAvg === undefined
+          ? "缺少全局均值"
+          : `较均值 ${signedNumber(timing.total - totalAvg)} ms`,
+    },
+    {
+      label: "传输占比",
+      value: percentText(ratio(timing.transport, timing.total)),
+      tone: latencyTone(timing.transport, latencySummary?.transport_latency),
+      note: formatMs(timing.transport),
+    },
+    {
+      label: "推理占比",
+      value: percentText(ratio(timing.inference, timing.total)),
+      tone: latencyTone(timing.inference, latencySummary?.inference_latency),
+      note: formatMs(timing.inference),
+    },
+    {
+      label: "全局分位",
+      value: totalRank === null ? "--" : `P${Math.round(totalRank)}`,
+      tone: totalStatus,
+      note: totalRank === null ? "无法比较" : "数值越高说明越慢",
+    },
+  ];
+
+  return (
+    <div className="section-panel frame-diagnosis-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">当前帧</p>
+          <h2>延迟、提示词与时间线</h2>
+        </div>
+        <span className="frame-badge">步 {stepIdx}</span>
+      </div>
+
+      <div className="diagnostic-card-grid">
+        {cards.map((card) => (
+          <article key={card.label} className="diagnostic-card">
+            <div className="diagnostic-card-top">
+              <span className="stat-label">{card.label}</span>
+              <span className={`diagnostic-chip ${card.tone.toneClass}`}>{card.tone.label}</span>
+            </div>
+            <strong>{card.value}</strong>
+            <p>{card.note}</p>
+          </article>
+        ))}
+      </div>
+
+      <div className="frame-diagnosis-grid">
+        <article className="context-card">
+          <p className="panel-title">时延拆解</p>
+          <LatencyBreakdown timing={currentStep.timing} />
+          <p className="context-note">{latencyDriver(currentStep.timing)}</p>
+        </article>
+
+        <article className="context-card">
+          <p className="panel-title">提示词与标签</p>
+          <p className="prompt-block">{promptText}</p>
+          {tags.length ? (
+            <div className="tag-list">
+              {tags.map(([key, value]) => (
+                <span key={key} className="meta-tag">{key}: {String(value)}</span>
+              ))}
+            </div>
+          ) : (
+            <p className="context-note">当前 step 没有额外标签。</p>
+          )}
+        </article>
+      </div>
+
+      <article className="context-card">
+        <div className="context-card-header">
+          <p className="panel-title">附近延迟窗口</p>
+          <span className="muted">点击切换到对应帧</span>
+        </div>
+        <NearbyLatencyBars rows={nearbyLatencyRows} currentStepIdx={stepIdx} onSelect={onSelectStep} />
+      </article>
+
+      {currentStep.timeline_events?.length ? (
+        <TimelineEvents events={currentStep.timeline_events} />
+      ) : (
+        <div className="timeline-fallback">
+          <strong>未记录原始链路时间戳</strong>
+          <p>这次 run 只有 transport / inference 时长，没有 client_send、server_recv、infer_start 等事件点。</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActionWindowPanel({ currentStep, currentBoundary, currentExecution, actionLabels = [] }) {
+  const chunk = currentStep.action_chunk || [];
+  const cards = actionDimensionCards(chunk, actionLabels);
+  const dominant = dominantActionCard(cards);
+  const firstXYZ = chunk[0]?.slice(0, 3) || [];
+  const lastXYZ = chunk[chunk.length - 1]?.slice(0, 3) || [];
+  const xyzShift =
+    firstXYZ.length === 3 && lastXYZ.length === 3
+      ? Math.sqrt(firstXYZ.reduce((sum, value, index) => sum + (Number(lastXYZ[index]) - Number(value)) ** 2, 0))
+      : null;
+  const gripperIdx = actionLabels.findIndex((label) => String(label).toLowerCase() === "gripper");
+  const gripperEnd = gripperIdx >= 0 ? chunk[chunk.length - 1]?.[gripperIdx] ?? null : null;
+
+  const summaryCards = [
+    { label: "窗口长度", value: chunk.length ? `${chunk.length} 步` : "--", note: `维度 ${actionLabels.length || 0}` },
+    {
+      label: "执行区间",
+      value: currentExecution.length ? `${currentBoundary.start}-${currentBoundary.end - 1}` : "--",
+      note: currentExecution.length ? "全局执行步" : "暂无展开执行数据",
+    },
+    {
+      label: "XYZ 漂移",
+      value: xyzShift === null ? "--" : formatNumber(xyzShift, 3),
+      note: xyzShift === null ? "缺少三维动作" : "首步到末步的欧氏距离",
+    },
+    {
+      label: "主变化维度",
+      value: dominant?.label || "--",
+      note: dominant?.span === null || dominant?.span === undefined ? "无法判断" : `波动 ${formatNumber(dominant.span, 3)}`,
+    },
+  ];
+
+  return (
+    <div className="section-panel action-window-panel">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">动作块</p>
+          <h2>当前推理窗口</h2>
+        </div>
+        {chunk.length ? (
+          <span className="frame-badge">
+            {chunk.length} 步 × {(chunk[0] || []).length} 维
+          </span>
+        ) : null}
+      </div>
+
+      <div className="diagnostic-card-grid">
+        {summaryCards.map((card) => (
+          <article key={card.label} className="diagnostic-card">
+            <span className="stat-label">{card.label}</span>
+            <strong>{card.value}</strong>
+            <p>{card.note}</p>
+          </article>
+        ))}
+      </div>
+
+      <article className="context-card">
+        <div className="context-card-header">
+          <p className="panel-title">维度趋势</p>
+          <span className="muted">每张卡表示这次 chunk 内一个动作维度的变化</span>
+        </div>
+        {cards.length ? (
+          <div className="action-dimension-grid">
+            {cards.map((card) => (
+              <article key={card.label} className="action-dimension-card">
+                <div className="action-dimension-head">
+                  <strong>{card.label}</strong>
+                  <span className={card.delta !== null && card.delta < 0 ? "tone-bad" : "tone-good"}>
+                    {signedNumber(card.delta, 3)}
+                  </span>
+                </div>
+                <MiniTrend values={card.values} color={card.color} activeIndex={0} />
+                <div className="action-dimension-meta">
+                  <span>首 {formatNumber(card.first, 3)}</span>
+                  <span>末 {formatNumber(card.last, 3)}</span>
+                  <span>波动 {formatNumber(card.span, 3)}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-panel">当前 step 没有动作块。</div>
+        )}
+      </article>
     </div>
   );
 }
@@ -564,66 +1038,15 @@ export default function RunReplayClient({ replay, project, runName }) {
 
       {activeTab === "replay" ? (
         <>
-          {/* 第一行：视觉观测 + 当前帧指标 */}
-          <section className="detail-grid">
+          <section className="section-panel">
             <StepImages
               images={currentStep.images || []}
               selectedCamera={selectedCamera}
               onCameraChange={setSelectedCamera}
               title="视觉观测"
             />
-            <div className="section-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">当前帧</p>
-                  <h2>延迟、提示词与时间线</h2>
-                </div>
-                <span className="frame-badge">步 {stepIdx}</span>
-              </div>
-
-              {/* 延迟三卡片 —— 带颜色区分 */}
-              <div className="latency-trio">
-                <div className="latency-kpi accent-amber">
-                  <span className="latency-kpi-label">传输</span>
-                  <strong className="latency-kpi-value">{formatMs(currentStep.timing?.transport_latency_ms)}</strong>
-                </div>
-                <div className="latency-kpi accent-blue">
-                  <span className="latency-kpi-label">推理</span>
-                  <strong className="latency-kpi-value">{formatMs(currentStep.timing?.inference_latency_ms)}</strong>
-                </div>
-                <div className="latency-kpi accent-teal">
-                  <span className="latency-kpi-label">总计</span>
-                  <strong className="latency-kpi-value">{formatMs(currentStep.timing?.total_latency_ms)}</strong>
-                </div>
-              </div>
-
-              {/* 结构化元数据 */}
-              <dl className="step-meta-list">
-                <div className="step-meta-row">
-                  <dt>提示词</dt>
-                  <dd>{currentStep.prompt || meta.task_prompt || "--"}</dd>
-                </div>
-                {Object.keys(currentStep.tags || {}).length ? (
-                  <div className="step-meta-row">
-                    <dt>标签</dt>
-                    <dd className="mono-text">{JSON.stringify(currentStep.tags)}</dd>
-                  </div>
-                ) : null}
-                <div className="step-meta-row">
-                  <dt>状态快照</dt>
-                  <dd className="mono-text">{vectorText(currentStep.state, replay.state_labels)}</dd>
-                </div>
-                <div className="step-meta-row">
-                  <dt>首个动作</dt>
-                  <dd className="mono-text">{vectorText(currentStep.action_preview, replay.action_labels)}</dd>
-                </div>
-              </dl>
-
-              <TimelineEvents events={currentStep.timeline_events} />
-            </div>
           </section>
 
-          {/* 第二行：3D 规划 + 动作块 */}
           <section className="detail-grid">
             <div className="section-panel">
               <div className="section-heading">
@@ -655,58 +1078,12 @@ export default function RunReplayClient({ replay, project, runName }) {
               </section>
             </div>
 
-            <div className="section-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">动作块</p>
-                  <h2>当前推理窗口</h2>
-                </div>
-                {currentStep.action_chunk?.length ? (
-                  <span className="frame-badge">
-                    {currentStep.action_chunk.length} 步 × {(currentStep.action_chunk[0] || []).length} 维
-                  </span>
-                ) : null}
-              </div>
-
-              {/* 热图全宽展示 */}
-              <HeatmapChart
-                matrix={chunkHeatmap(currentStep)}
-                rowLabels={replay.action_labels}
-                title={`步 ${stepIdx} · 动作块热图`}
-              />
-
-              {/* 首动作条形图 + 执行窗口并排 */}
-              <div className="chunk-bottom-grid">
-                <ValueBarList
-                  title="首个执行动作"
-                  labels={replay.action_labels}
-                  values={currentStep.action_preview || []}
-                />
-                {currentExecution.length ? (
-                  <div className="section-panel compact-panel">
-                    <p className="panel-title">执行窗口（步 {currentBoundary.start}–{currentBoundary.end - 1}）</p>
-                    <div className="table-shell">
-                      <table className="data-table compact-table">
-                        <thead>
-                          <tr>
-                            <th>执行步</th>
-                            <th>动作向量</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {currentExecution.map((row) => (
-                            <tr key={row.execStep}>
-                              <td>{row.execStep}</td>
-                              <td className="mono-text">{row.label}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
+            <ActionWindowPanel
+              currentStep={currentStep}
+              currentBoundary={currentBoundary}
+              currentExecution={currentExecution}
+              actionLabels={replay.action_labels || []}
+            />
           </section>
 
           <section className="section-panel">
@@ -913,6 +1290,17 @@ export default function RunReplayClient({ replay, project, runName }) {
 
       {activeTab === "latency" ? (
         <section className="section-stack">
+          <FrameDiagnosisPanel
+            currentStep={currentStep}
+            stepIdx={stepIdx}
+            nearbyLatencyRows={nearbySteps.map((idx) => ({
+              stepIdx: idx,
+              total: totalLatency(steps[idx]?.timing || {}),
+            }))}
+            latencySummary={replay.latency_summary || {}}
+            meta={meta}
+            onSelectStep={jumpToStep}
+          />
           <LineChart
             title="传输 / 推理 / 总延迟趋势"
             markerIndex={stepIdx}
