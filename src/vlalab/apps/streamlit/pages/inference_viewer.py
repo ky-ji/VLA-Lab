@@ -14,6 +14,9 @@ from pathlib import Path
 import json
 import cv2
 import shutil
+import importlib.util
+import subprocess
+import sys
 from typing import Optional, Dict, Any, List, Tuple
 
 # Pre-import pandas to avoid circular import when plotly checks pd.Series
@@ -23,6 +26,149 @@ except ImportError:
     pass
 
 import vlalab
+
+
+_GROOT_ATTENTION_BACKEND = None
+_GROOT_ATTENTION_PYTHON = None
+
+
+def _load_groot_attention_backend():
+    global _GROOT_ATTENTION_BACKEND
+    if _GROOT_ATTENTION_BACKEND is not None:
+        return _GROOT_ATTENTION_BACKEND
+
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        candidate = parent / "Isaac-GR00T" / "realworld_deploy" / "offline_attention" / "backend.py"
+        if candidate.exists():
+            spec = importlib.util.spec_from_file_location("groot_offline_attention_backend", candidate)
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"Failed to load attention backend from {candidate}")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _GROOT_ATTENTION_BACKEND = module
+            return module
+
+    raise FileNotFoundError("Could not locate Isaac-GR00T offline attention backend in this workspace.")
+
+
+def _python_has_module(python_executable: str, module_name: str) -> bool:
+    try:
+        result = subprocess.run(
+            [python_executable, "-c", f"import {module_name}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _find_groot_attention_python() -> Optional[str]:
+    global _GROOT_ATTENTION_PYTHON
+    if _GROOT_ATTENTION_PYTHON is not None:
+        return _GROOT_ATTENTION_PYTHON
+
+    backend = _load_groot_attention_backend()
+    isaac_root = Path(getattr(backend, "ISAAC_ROOT", Path(backend.__file__).resolve().parents[2]))
+    candidates = [
+        Path(sys.executable),
+        isaac_root / ".venv" / "bin" / "python",
+    ]
+
+    seen = set()
+    for candidate in candidates:
+        candidate = Path(candidate)
+        candidate_str = str(candidate)
+        if candidate_str in seen:
+            continue
+        seen.add(candidate_str)
+        if not candidate.exists():
+            continue
+        if _python_has_module(candidate_str, "torch"):
+            _GROOT_ATTENTION_PYTHON = candidate_str
+            return _GROOT_ATTENTION_PYTHON
+
+    return None
+
+
+def _run_attention_generation_subprocess(
+    *,
+    run_dir: Path,
+    requested_steps: List[int],
+    device: str,
+    attention_layer: int,
+    output_dir: Path,
+    model_path_override: Optional[str],
+    prompt_override: Optional[str],
+) -> tuple[dict, str]:
+    backend = _load_groot_attention_backend()
+    python_executable = _find_groot_attention_python()
+    if python_executable is None:
+        raise RuntimeError(
+            "Could not find a Python environment with torch for attention generation."
+        )
+
+    script_path = Path(backend.__file__).resolve().parent / "run_offline_attention.py"
+    cmd = [
+        python_executable,
+        str(script_path),
+        "--run-dir",
+        str(run_dir),
+        "--steps",
+        ",".join(str(idx) for idx in requested_steps),
+        "--device",
+        device,
+        "--attention-layer",
+        str(attention_layer),
+        "--output-dir",
+        str(output_dir),
+    ]
+    if model_path_override:
+        cmd.extend(["--model-path", model_path_override])
+    if prompt_override:
+        cmd.extend(["--prompt", prompt_override])
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        error_text = (result.stderr or result.stdout or "").strip()
+        if error_text:
+            error_text = "\n".join(error_text.splitlines()[-12:])
+        raise RuntimeError(error_text or f"Attention subprocess failed with code {result.returncode}")
+
+    summary = backend.load_cached_summary(output_dir)
+    if summary is None:
+        raise RuntimeError("Attention generation finished but summary.json was not found.")
+
+    stdout_tail = (result.stdout or "").strip()
+    if stdout_tail:
+        stdout_tail = "\n".join(stdout_tail.splitlines()[-8:])
+    return summary, stdout_tail
+
+
+@st.cache_resource(show_spinner=False)
+def _get_cached_attention_engine(
+    model_path: str,
+    device: str,
+    attention_layer: int,
+    num_images: int,
+    action_dim: int,
+):
+    backend = _load_groot_attention_backend()
+    return backend.create_engine(
+        model_path=model_path,
+        device=device,
+        num_images=num_images,
+        action_dim=action_dim,
+        attention_layer=attention_layer,
+        warmup=True,
+    )
 
 
 # Action 维度标签 (通用)
@@ -218,6 +364,264 @@ class InferenceRunViewer:
             if img is not None:
                 out[str(cam)] = img
         return out
+
+    def get_attention_cache_info(
+        self,
+        attention_layer: int,
+        model_path_override: Optional[str] = None,
+        prompt_override: Optional[str] = None,
+    ) -> Tuple[Optional[Path], Optional[dict], Optional[str]]:
+        """Get attention cache directory and summary for this run."""
+        try:
+            backend = _load_groot_attention_backend()
+            _, _, model_path, _ = backend.resolve_run_context(
+                self.run_path,
+                model_path_override=model_path_override,
+                prompt_override=prompt_override,
+            )
+            output_dir = backend.build_default_output_dir(self.run_path, model_path, attention_layer)
+            summary = backend.load_cached_summary(output_dir)
+            return output_dir, summary, model_path
+        except Exception:
+            return None, None, None
+
+    def _render_image_grid(self, images: Dict[str, np.ndarray], empty_message: str = "无图像数据"):
+        """Render a compact image grid for camera observations."""
+        if not images:
+            st.warning(empty_message)
+            return
+
+        cam_names = list(images.keys())
+        n_cols = min(3, max(1, len(cam_names)))
+        cols = st.columns(n_cols)
+        for idx, cam in enumerate(cam_names):
+            with cols[idx % n_cols]:
+                st.image(
+                    images[cam],
+                    caption=str(cam),
+                    use_container_width=True,
+                )
+
+    def _render_attention_cache_window(
+        self,
+        step_idx: int,
+        summary: Optional[dict],
+        radius: int = 4,
+    ):
+        """Render cache status around the current step to help browsing nearby frames."""
+        st.markdown("#### 附近 Step 缓存状态")
+
+        if not self.steps:
+            st.caption("无步骤数据")
+            return
+
+        cached_steps = {
+            int(result.get("step_idx", -1))
+            for result in (summary or {}).get("results", [])
+        }
+        start = max(0, step_idx - radius)
+        end = min(len(self.steps) - 1, step_idx + radius)
+        cols = st.columns(end - start + 1)
+
+        for col, idx in zip(cols, range(start, end + 1)):
+            cached = idx in cached_steps
+            is_current = idx == step_idx
+            label = "当前" if is_current else ""
+            status = "已缓存" if cached else "未缓存"
+            with col:
+                st.metric(
+                    f"Step {idx}",
+                    "OK" if cached else "--",
+                    delta=label if label else None,
+                )
+                st.caption(status)
+
+    def render_attention_workspace(
+        self,
+        step_idx: int,
+        *,
+        device: str = "cuda:0",
+        attention_layer: int = -1,
+        model_path_override: Optional[str] = None,
+        prompt_override: Optional[str] = None,
+    ):
+        """Render a dedicated attention workspace that cooperates with replay step selection."""
+        if not self.valid or step_idx >= len(self.steps):
+            return
+
+        step = self.steps[step_idx]
+        step_prompt = step.get("prompt") or self.meta.get("task_prompt")
+        step_images = self.get_step_images(step_idx)
+        cache_dir, cache_summary, resolved_model_path = self.get_attention_cache_info(
+            attention_layer=attention_layer,
+            model_path_override=model_path_override,
+            prompt_override=prompt_override,
+        )
+
+        current_cached = False
+        if cache_summary:
+            current_cached = any(
+                int(result.get("step_idx", -1)) == int(step_idx)
+                for result in cache_summary.get("results", [])
+            )
+
+        info_col1, info_col2, info_col3, info_col4 = st.columns(4)
+        with info_col1:
+            st.metric("当前 Step", step_idx)
+        with info_col2:
+            st.metric("相机数", len(step_images))
+        with info_col3:
+            st.metric("当前缓存", "是" if current_cached else "否")
+        with info_col4:
+            cached_count = len((cache_summary or {}).get("results", []))
+            st.metric("已缓存 Step", cached_count)
+
+        if resolved_model_path:
+            st.caption(f"Attention 模型: `{Path(resolved_model_path).name}`")
+        if cache_dir is not None:
+            st.caption(f"缓存目录: `{cache_dir}`")
+        if step_prompt:
+            st.info(f"当前指令: {step_prompt}")
+
+        top_col1, top_col2 = st.columns([1.2, 0.8])
+        with top_col1:
+            st.markdown("#### 当前观测图像")
+            self._render_image_grid(step_images, empty_message="该 step 无图像数据")
+        with top_col2:
+            self._render_attention_cache_window(step_idx, cache_summary)
+
+        st.divider()
+        self.render_attention_panel(
+            step_idx,
+            device=device,
+            attention_layer=attention_layer,
+            model_path_override=model_path_override,
+            prompt_override=prompt_override,
+        )
+
+    def render_attention_panel(
+        self,
+        step_idx: int,
+        *,
+        device: str = "cuda:0",
+        attention_layer: int = -1,
+        model_path_override: Optional[str] = None,
+        prompt_override: Optional[str] = None,
+    ):
+        """Render attention generation and cached overlay display."""
+        st.markdown("#### 🧠 Attention Map")
+
+        try:
+            backend = _load_groot_attention_backend()
+            meta, _, model_path, prompt = backend.resolve_run_context(
+                self.run_path,
+                model_path_override=model_path_override,
+                prompt_override=prompt_override,
+            )
+        except Exception as exc:
+            st.warning(f"Attention backend unavailable: {exc}")
+            return
+
+        output_dir = backend.build_default_output_dir(self.run_path, model_path, attention_layer)
+        summary = backend.load_cached_summary(output_dir)
+        cached_result = backend.get_step_result(summary, step_idx)
+
+        info_col1, info_col2, info_col3 = st.columns(3)
+        with info_col1:
+            st.caption(f"Device: `{device}`")
+        with info_col2:
+            st.caption(f"Layer: `{attention_layer}`")
+        with info_col3:
+            st.caption(f"Cache: `{output_dir.name}`")
+
+        model_name = Path(model_path).name
+        st.caption(f"Model: `{model_name}`")
+        if prompt:
+            st.caption(f"Prompt: `{prompt}`")
+
+        button_col1, button_col2 = st.columns(2)
+        generate_current = button_col1.button(
+            "生成当前 Step Attention",
+            key=f"attn_generate_current_{self.run_path}_{step_idx}_{attention_layer}",
+            type="primary",
+        )
+        generate_window = button_col2.button(
+            "生成附近 5 步",
+            key=f"attn_generate_window_{self.run_path}_{step_idx}_{attention_layer}",
+        )
+
+        requested_steps = None
+        if generate_current:
+            requested_steps = [step_idx]
+        elif generate_window:
+            start = max(0, step_idx - 2)
+            end = min(len(self.steps) - 1, step_idx + 2)
+            requested_steps = list(range(start, end + 1))
+
+        if requested_steps:
+            with st.spinner(f"Generating attention for steps {requested_steps} ..."):
+                try:
+                    used_subprocess = False
+                    subprocess_log = ""
+                    if _python_has_module(sys.executable, "torch"):
+                        engine = _get_cached_attention_engine(
+                            model_path=model_path,
+                            device=device,
+                            attention_layer=attention_layer,
+                            num_images=int(meta.get("extra", {}).get("config", {}).get("num_images", 2)),
+                            action_dim=int(meta.get("action_dim", 8)),
+                        )
+                        summary, _ = backend.generate_attention_for_steps(
+                            run_dir=self.run_path,
+                            step_indices=requested_steps,
+                            device=device,
+                            attention_layer=attention_layer,
+                            output_dir=output_dir,
+                            model_path_override=model_path,
+                            prompt_override=prompt,
+                            warmup=False,
+                            engine=engine,
+                        )
+                    else:
+                        used_subprocess = True
+                        summary, subprocess_log = _run_attention_generation_subprocess(
+                            run_dir=self.run_path,
+                            requested_steps=requested_steps,
+                            device=device,
+                            attention_layer=attention_layer,
+                            output_dir=output_dir,
+                            model_path_override=model_path,
+                            prompt_override=prompt,
+                        )
+                    cached_result = backend.get_step_result(summary, step_idx)
+                    if used_subprocess:
+                        st.success(f"Attention generated for steps {requested_steps} via Isaac-GR00T Python")
+                        if subprocess_log:
+                            st.caption(subprocess_log)
+                    else:
+                        st.success(f"Attention generated for steps {requested_steps}")
+                except Exception as exc:
+                    st.error(f"Failed to generate attention: {exc}")
+                    return
+
+        cached_step_count = len(summary.get("results", [])) if summary else 0
+        st.caption(f"Cached attention steps: {cached_step_count}")
+
+        if not cached_result or not cached_result.get("overlay_files"):
+            st.info("当前 step 还没有缓存的 attention 图。点击上面的按钮生成。")
+            return
+
+        overlay_files = cached_result.get("overlay_files", [])
+        cols = st.columns(min(2, max(1, len(overlay_files))))
+        for idx, overlay in enumerate(overlay_files):
+            overlay_path = overlay.get("overlay_path")
+            if not overlay_path or not Path(overlay_path).exists():
+                continue
+            with cols[idx % len(cols)]:
+                st.image(str(overlay_path), caption=overlay.get("camera_name", "attention"), use_container_width=True)
+                heatmap_path = overlay.get("heatmap_npy_path")
+                if heatmap_path:
+                    st.caption(Path(heatmap_path).name)
     
     def get_step_state(self, step_idx: int) -> np.ndarray:
         """Get state for a step."""
@@ -930,20 +1334,7 @@ class InferenceRunViewer:
         
         with left_col:
             st.markdown("#### 👁️ 模型视觉观测")
-            if imgs:
-                cam_names = list(imgs.keys())
-                n_cols = min(3, max(1, len(cam_names)))
-                cols = st.columns(n_cols)
-                for i, cam in enumerate(cam_names):
-                    with cols[i % n_cols]:
-                        img = imgs[cam]
-                        st.image(
-                            img,
-                            caption=f"{cam}",
-                            use_container_width=True,
-                        )
-            else:
-                st.warning("无图像数据")
+            self._render_image_grid(imgs)
 
             st.markdown("#### 🗺️ 3D 动作规划")
             
@@ -1227,9 +1618,26 @@ def render():
         run_paths = vlalab.list_runs()
     else:
         run_paths = vlalab.list_runs(project=selected_project)
-    
+
     if not run_paths:
         st.info("该项目下没有运行记录。")
+        return
+
+    run_filter = st.sidebar.text_input(
+        "筛选运行",
+        value=st.session_state.get("vlalab_run_filter", ""),
+        placeholder="输入 run 名称 / project / checkpoint",
+        key="vlalab_run_filter",
+    ).strip().lower()
+
+    if run_filter:
+        run_paths = [
+            path for path in run_paths
+            if run_filter in path.name.lower() or run_filter in path.parent.name.lower()
+        ]
+
+    if not run_paths:
+        st.info("筛选后没有匹配的运行记录。")
         return
     
     # Select run
@@ -1275,7 +1683,47 @@ def render():
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 显示选项")
     show_details = st.sidebar.checkbox("显示推理详情", value=True, help="显示详细的模型推理信息面板")
-    
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Attention 设置")
+    st.sidebar.text_input(
+        "Attention Device",
+        value=st.session_state.get("vlalab_attention_device", "cuda:0"),
+        key="vlalab_attention_device",
+        help="用于离线生成 attention 的设备，例如 cuda:0 或 cpu",
+    )
+    st.sidebar.number_input(
+        "Attention Layer",
+        value=int(st.session_state.get("vlalab_attention_layer", -1)),
+        step=1,
+        key="vlalab_attention_layer",
+        help="-1 表示最后一层",
+    )
+    st.sidebar.text_input(
+        "模型路径覆盖",
+        value=st.session_state.get("vlalab_attention_model_path", ""),
+        key="vlalab_attention_model_path",
+        help="留空则使用 run 记录的 model_path",
+    )
+    st.sidebar.text_input(
+        "指令覆盖",
+        value=st.session_state.get("vlalab_attention_prompt", ""),
+        key="vlalab_attention_prompt",
+        help="留空则使用 run 记录的 task_prompt",
+    )
+
+    cache_dir, cache_summary, resolved_model_path = viewer.get_attention_cache_info(
+        attention_layer=int(st.session_state.get("vlalab_attention_layer", -1)),
+        model_path_override=st.session_state.get("vlalab_attention_model_path") or None,
+        prompt_override=st.session_state.get("vlalab_attention_prompt") or None,
+    )
+    if cache_dir is not None:
+        st.sidebar.caption(f"Attention缓存目录: {cache_dir.name}")
+    if resolved_model_path:
+        st.sidebar.caption(f"Attention模型: {Path(resolved_model_path).name}")
+    if cache_summary:
+        st.sidebar.info(f"Attention缓存步数: {len(cache_summary.get('results', []))}")
+
     # Delete run section
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⚠️ 危险操作")
@@ -1311,20 +1759,60 @@ def render():
                 st.session_state[delete_key] = False
                 st.rerun()
     
+    step_state_key = f"vlalab_step_idx::{selected_path}"
+    if viewer.steps:
+        max_step_idx = len(viewer.steps) - 1
+        if step_state_key not in st.session_state:
+            st.session_state[step_state_key] = 0
+        st.session_state[step_state_key] = max(0, min(int(st.session_state[step_state_key]), max_step_idx))
+
+        st.markdown("### Step 选择")
+        nav_col1, nav_col2, nav_col3 = st.columns([1, 6, 1])
+        with nav_col1:
+            if st.button("上一帧", key=f"prev_step::{selected_path}", use_container_width=True):
+                st.session_state[step_state_key] = max(0, st.session_state[step_state_key] - 1)
+                st.rerun()
+        with nav_col2:
+            st.slider(
+                "当前 Step",
+                0,
+                max_step_idx,
+                key=step_state_key,
+            )
+        with nav_col3:
+            if st.button("下一帧", key=f"next_step::{selected_path}", use_container_width=True):
+                st.session_state[step_state_key] = min(max_step_idx, st.session_state[step_state_key] + 1)
+                st.rerun()
+
+        step_idx = int(st.session_state[step_state_key])
+    else:
+        step_idx = 0
+
     # Tabs - expanded with more views
-    tab1, tab2, tab3 = st.tabs(["📺 逐帧回放", "🎯 动作分析", "🤖 模型配置"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📺 逐帧回放", "🧠 Attention", "🎯 动作分析", "🤖 模型配置"])
     
     with tab1:
         if viewer.steps:
-            step_idx = st.slider("Step", 0, len(viewer.steps)-1, 0)
             viewer.plot_replay_frame(step_idx, show_details=show_details)
         else:
             st.warning("无步骤数据")
-    
+
     with tab2:
+        if viewer.steps:
+            viewer.render_attention_workspace(
+                step_idx,
+                device=st.session_state.get("vlalab_attention_device", "cuda:0"),
+                attention_layer=int(st.session_state.get("vlalab_attention_layer", -1)),
+                model_path_override=st.session_state.get("vlalab_attention_model_path") or None,
+                prompt_override=st.session_state.get("vlalab_attention_prompt") or None,
+            )
+        else:
+            st.warning("无步骤数据")
+
+    with tab3:
         viewer.plot_action_statistics()
     
-    with tab3:
+    with tab4:
         viewer.render_model_config_panel()
         
         # Raw metadata
