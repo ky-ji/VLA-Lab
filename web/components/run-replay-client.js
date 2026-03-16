@@ -1259,6 +1259,10 @@ export default function RunReplayClient({ replay, project, runName }) {
               </div>
               <div className="meta-panel">
                 <div>
+                  <span className="stat-label">Attention Backend</span>
+                  <p>{attentionData?.backend_name || "--"}</p>
+                </div>
+                <div>
                   <span className="stat-label">实际模型路径</span>
                   <PathText value={attentionData?.model_path || meta.model_path || "--"} />
                 </div>

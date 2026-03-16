@@ -584,7 +584,7 @@ def get_runs_dir(dir: Optional[str] = None) -> Path:
         base_dir = os.environ.get("VLALAB_DIR")
     else:
         # 对于可视化/查询工具，从当前工作目录检测项目根目录
-        # （用户运行 streamlit 或其他可视化命令的目录）
+        # （用户运行 web UI 或其他可视化命令的目录）
         project_root = _find_project_root(start_path=Path.cwd())
         if project_root:
             base_dir = project_root / "vlalab_runs"

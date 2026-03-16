@@ -201,55 +201,6 @@ def _ensure_web_python_dependencies(install: bool = False) -> None:
     raise click.Abort()
 
 
-def _launch_streamlit_view(port: int, run_dir: str):
-    """Launch the legacy Streamlit visualization app."""
-    _ensure_port_available(port, f"vlalab view --legacy --port {port + 1}")
-
-    app_path = Path(__file__).parent / "apps" / "streamlit" / "app.py"
-
-    if not app_path.exists():
-        import vlalab
-
-        package_dir = Path(vlalab.__file__).parent
-        app_path = package_dir / "apps" / "streamlit" / "app.py"
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        str(app_path),
-        "--server.port",
-        str(port),
-        "--server.address",
-        "0.0.0.0",
-    ]
-
-    if run_dir:
-        cmd.extend(["--", "--run-dir", run_dir])
-
-    console.print(f"[green]Starting legacy VLA-Lab Streamlit viewer on port {port}...[/green]")
-
-    proc = subprocess.Popen(cmd, start_new_session=True)
-    pid_file = _get_pid_file(port, prefix="view")
-    pid_file.write_text(str(proc.pid))
-    atexit.register(lambda: _cleanup_on_exit(port, proc))
-
-    def signal_handler(signum, frame):
-        console.print("\n[yellow]Shutting down VLA-Lab viewer...[/yellow]")
-        _terminate_process_group(proc)
-        pid_file.unlink(missing_ok=True)
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    try:
-        proc.wait()
-    finally:
-        pid_file.unlink(missing_ok=True)
-
-
 def _launch_web_services(
     host: str,
     api_port: int,
@@ -372,7 +323,7 @@ def main():
 @main.command()
 @click.option(
     "--port", "-p", default=None, type=int,
-    help="Frontend port for the web UI, or the Streamlit port when --legacy is enabled"
+    help="Frontend port for the web UI"
 )
 @click.option("--api-port", default=8000, type=int, help="Port for the FastAPI backend")
 @click.option("--host", default="0.0.0.0", help="Host for the web services")
@@ -381,18 +332,13 @@ def main():
     default=False,
     help="Run npm install in web/ before starting the frontend",
 )
-@click.option("--legacy", is_flag=True, default=False, help="Launch the old Streamlit viewer instead of the web UI")
 @click.option(
     "--run-dir", "-r", default=None, type=click.Path(exists=True),
     help="Default run directory to load"
 )
-def view(port: Optional[int], api_port: int, host: str, install: bool, legacy: bool, run_dir: str):
+def view(port: Optional[int], api_port: int, host: str, install: bool, run_dir: str):
     """Launch the default VLA-Lab viewer."""
-    resolved_port = port if port is not None else (8501 if legacy else 3000)
-
-    if legacy:
-        _launch_streamlit_view(port=resolved_port, run_dir=run_dir)
-        return
+    resolved_port = port if port is not None else 3000
 
     _launch_web_services(
         host=host,
@@ -436,7 +382,7 @@ def serve(host: str, api_port: int, web_port: int, frontend: bool, install: bool
 
 @main.command()
 @click.option(
-    "--port", "-p", default=8501, type=int, help="Port to kill processes on"
+    "--port", "-p", default=3000, type=int, help="Port to kill processes on"
 )
 @click.option(
     "--force", "-f", is_flag=True, default=False,

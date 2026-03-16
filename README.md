@@ -240,12 +240,9 @@ vlalab view --port 3100
 
 # Override the run directory used by the API
 vlalab view --run-dir /path/to/vlalab_runs
-
-# Launch the old Streamlit app
-vlalab view --legacy --port 8501
 ```
 
-The new web UI now covers the main legacy workflows:
+The web UI covers the main workflows:
 
 - overview / run list / run detail
 - latency comparison
@@ -355,9 +352,6 @@ logger.close()
 # Launch the default FastAPI + Next.js dashboard
 vlalab view [--port 3000] [--api-port 8000]
 
-# Launch the old Streamlit dashboard
-vlalab view --legacy [--port 8501]
-
 # Launch FastAPI backend and optional Next.js frontend
 vlalab serve [--api-port 8000] [--web-port 3000] [--frontend/--no-frontend]
 
@@ -367,6 +361,20 @@ vlalab convert /path/to/old_log.json -o /path/to/output
 # Inspect a run
 vlalab info /path/to/run_dir
 ```
+
+### Attention Backend Integration
+
+`VLA-Lab` now treats attention extraction as a model-provided backend with a stable interface.
+The built-in default still auto-discovers the existing `Isaac-GR00T` backend, but new models should register their own backend explicitly:
+
+```bash
+export VLALAB_ATTENTION_BACKEND=/abs/path/to/backend.py
+export VLALAB_ATTENTION_PYTHON=/abs/path/to/python  # optional
+```
+
+Interface contract and migration checklist:
+
+- [Attention Backend Guide](docs/attention_backend.md)
 
 ---
 

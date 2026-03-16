@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+from vlalab.attention import (
+    get_attention_backend_label,
+    load_attention_backend,
+    run_attention_generation_subprocess,
+)
 
 from .service import (
     build_run_summary,
@@ -28,10 +30,6 @@ ACTION_DIM_LABELS = {
     6: ["x", "y", "z", "rx", "ry", "rz"],
     3: ["x", "y", "z"],
 }
-
-_GROOT_ATTENTION_BACKEND = None
-_GROOT_ATTENTION_PYTHON = None
-
 
 def _get_action_dim_labels(action_dim: int) -> List[str]:
     if action_dim in ACTION_DIM_LABELS:
@@ -379,53 +377,6 @@ def list_attention_caches(run_path: Path) -> List[Dict[str, Any]]:
     return caches
 
 
-def _load_groot_attention_backend():
-    global _GROOT_ATTENTION_BACKEND
-    if _GROOT_ATTENTION_BACKEND is not None:
-        return _GROOT_ATTENTION_BACKEND
-
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        candidate = parent / "Isaac-GR00T" / "realworld_deploy" / "offline_attention" / "backend.py"
-        if candidate.exists():
-            spec = importlib.util.spec_from_file_location("groot_offline_attention_backend", candidate)
-            if spec is None or spec.loader is None:
-                raise RuntimeError(f"Failed to load attention backend from {candidate}")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            _GROOT_ATTENTION_BACKEND = module
-            return module
-
-    raise FileNotFoundError("Could not locate Isaac-GR00T offline attention backend in this workspace.")
-
-
-def _python_has_module(python_executable: str, module_name: str) -> bool:
-    result = subprocess.run(
-        [python_executable, "-c", f"import {module_name}"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    return result.returncode == 0
-
-
-def _find_groot_attention_python() -> Optional[str]:
-    global _GROOT_ATTENTION_PYTHON
-    if _GROOT_ATTENTION_PYTHON is not None:
-        return _GROOT_ATTENTION_PYTHON
-
-    backend = _load_groot_attention_backend()
-    isaac_root = Path(getattr(backend, "ISAAC_ROOT", Path(backend.__file__).resolve().parents[2]))
-    candidates = [Path(sys.executable), isaac_root / ".venv" / "bin" / "python"]
-
-    for candidate in candidates:
-        candidate = Path(candidate)
-        if candidate.exists() and _python_has_module(str(candidate), "torch"):
-            _GROOT_ATTENTION_PYTHON = str(candidate)
-            return _GROOT_ATTENTION_PYTHON
-    return None
-
-
 def load_attention_state(
     runs_dir: Path,
     project: str,
@@ -436,7 +387,7 @@ def load_attention_state(
     prompt_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_path = resolve_run_path(runs_dir, project, run_name)
-    backend = _load_groot_attention_backend()
+    backend = load_attention_backend()
     _, _, model_path, prompt = backend.resolve_run_context(
         run_path,
         model_path_override=model_path_override,
@@ -462,6 +413,7 @@ def load_attention_state(
         )
 
     return {
+        "backend_name": get_attention_backend_label(backend),
         "step_idx": step_idx,
         "attention_layer": attention_layer,
         "model_path": model_path,
@@ -487,42 +439,23 @@ def generate_attention(
     prompt_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     run_path = resolve_run_path(runs_dir, project, run_name)
-    backend = _load_groot_attention_backend()
-    python_executable = _find_groot_attention_python()
-    if python_executable is None:
-        raise RuntimeError("Could not find a Python environment with torch for attention generation.")
-
-    script_path = Path(backend.__file__).resolve().parent / "run_offline_attention.py"
+    backend = load_attention_backend()
     _, _, model_path, prompt = backend.resolve_run_context(
         run_path,
         model_path_override=model_path_override,
         prompt_override=prompt_override,
     )
     output_dir = backend.build_default_output_dir(run_path, model_path, attention_layer)
-
-    cmd = [
-        python_executable,
-        str(script_path),
-        "--run-dir",
-        str(run_path),
-        "--steps",
-        ",".join(str(idx) for idx in requested_steps),
-        "--device",
-        device,
-        "--attention-layer",
-        str(attention_layer),
-        "--output-dir",
-        str(output_dir),
-    ]
-    if model_path_override:
-        cmd.extend(["--model-path", model_path_override])
-    if prompt_override:
-        cmd.extend(["--prompt", prompt_override])
-
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        error_text = (result.stderr or result.stdout or "").strip()
-        raise RuntimeError(error_text or f"Attention subprocess failed with code {result.returncode}")
+    _, stdout_tail = run_attention_generation_subprocess(
+        backend=backend,
+        run_dir=run_path,
+        requested_steps=requested_steps,
+        device=device,
+        attention_layer=attention_layer,
+        output_dir=output_dir,
+        model_path_override=model_path_override,
+        prompt_override=prompt_override,
+    )
 
     if focus_step is not None:
         step_to_return = int(focus_step)
@@ -543,5 +476,5 @@ def generate_attention(
     )
     state["requested_steps"] = requested_steps
     state["focus_step"] = step_to_return
-    state["stdout_tail"] = "\n".join((result.stdout or "").strip().splitlines()[-8:])
+    state["stdout_tail"] = stdout_tail
     return state
