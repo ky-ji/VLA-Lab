@@ -356,9 +356,6 @@ vlalab view [--port 3000] [--api-port 8000]
 # Launch FastAPI backend and optional Next.js frontend
 vlalab serve [--api-port 8000] [--web-port 3000] [--frontend/--no-frontend]
 
-# Launch a generic remote deploy agent from JSON config
-vlalab deploy-agent --config /path/to/agent.json [--port 9001]
-
 # Convert legacy logs (auto-detects format)
 vlalab convert /path/to/old_log.json -o /path/to/output
 
@@ -380,7 +377,6 @@ Interface contract and migration checklist:
 
 - [Attention Backend Guide](docs/attention_backend.md)
 - [Deploy Dashboard Guide](docs/deploy_dashboard.md)
-- [Deploy Agent Guide](docs/deploy_agent.md)
 
 ---
 

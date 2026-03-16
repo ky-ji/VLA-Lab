@@ -1,6 +1,6 @@
 # Deploy Dashboard
 
-`/deploy` 已重构为一个面向 realworld deploy 的极简控制台，不再依赖远端 `deploy-agent`，而是由 `VLA-Lab` 后端直接通过本机 `ssh` 执行两台目标机器上的固定命令。
+`/deploy` 是一个面向 realworld deploy 的极简控制台，由 `VLA-Lab` 后端直接通过本机 `ssh` 执行两台目标机器上的固定命令。
 
 ## 设计目标
 
@@ -136,9 +136,8 @@ vlalab serve --no-frontend --deploy-config configs/deploy/dashboard.json
 - 4 个固定命令按钮
 - 最近 jobs 与日志摘要
 
-页面不再包含：
+页面不包含：
 
-- deploy-agent 状态
 - workflow 编排卡片
 - action catalog
 - 任意命令编辑

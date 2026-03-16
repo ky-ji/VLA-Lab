@@ -4,7 +4,6 @@ VLA-Lab Command Line Interface
 Commands:
 - vlalab view: Launch the default visualization app
 - vlalab serve: Launch the FastAPI backend and optional Next.js frontend
-- vlalab deploy-agent: Launch a config-driven remote deploy agent
 - vlalab convert: Convert old log formats to VLA-Lab run format
 - vlalab init-run: Initialize a new run directory
 - vlalab info: Show information about a run
@@ -425,22 +424,6 @@ def kill(port: int, force: bool):
             console.print(f"[green]Cleaned up stale PID file[/green]")
         else:
             console.print(f"[green]Port {port} is not in use[/green]")
-
-
-@main.command("deploy-agent")
-@click.option(
-    "--config", "-c", "config_path", required=True, type=click.Path(exists=True),
-    help="Path to the deploy-agent JSON config"
-)
-@click.option("--host", default="0.0.0.0", help="Host for the deploy agent")
-@click.option("--port", default=9001, type=int, help="Port for the deploy agent")
-def deploy_agent(config_path: str, host: str, port: int):
-    """Launch a config-driven deploy agent for remote server/client orchestration."""
-    from vlalab.deploy import serve_agent
-
-    console.print(f"[green]Starting deploy agent[/green]: {config_path}")
-    console.print(f"[green]Listening[/green]: http://{host}:{port}")
-    serve_agent(config_path=config_path, host=host, port=port)
 
 
 @main.command()
