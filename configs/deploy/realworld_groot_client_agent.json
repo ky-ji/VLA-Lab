@@ -6,7 +6,6 @@
     "stack": "RealWorld-GR00T",
     "machine_role": "robot-client",
     "default_root": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy",
-    "joint_preset_behavior": "Both `home` and `ready` currently reuse control/set_joint_positions.py.",
     "inference_mode": "Uses `client_mode` from the dashboard and maps to `python inference_client.py -m ssh/local`."
   },
   "state_dir": "./.agent_state/realworld_groot_client",
@@ -47,10 +46,10 @@
     },
     "set_joint_preset": {
       "type": "command",
-      "label": "Set Joint Preset",
+      "label": "Move To Joint Pose",
       "shell": true,
       "timeout_sec": 120,
-      "command": "source \"${VLALAB_CONDA_SH:-/opt/miniconda3/etc/profile.d/conda.sh}\" && conda activate robot && case \"{joint_preset}\" in home|ready) python /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/robot_inference/control/set_joint_positions.py ;; *) echo \"Unsupported joint_preset: {joint_preset}. Supported presets: home, ready\" >&2; exit 2 ;; esac"
+      "command": "source \"${VLALAB_CONDA_SH:-/opt/miniconda3/etc/profile.d/conda.sh}\" && conda activate robot && python /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/robot_inference/control/set_joint_positions.py"
     },
     "start_inference_client": {
       "type": "managed_process",

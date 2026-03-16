@@ -25,16 +25,6 @@
       "type": "path",
       "required": true,
       "target": "client"
-    },
-    "joint_preset": {
-      "label": "Joint Preset",
-      "type": "enum",
-      "required": true,
-      "default": "home",
-      "options": [
-        "home",
-        "ready"
-      ]
     }
   },
   "commands": {
@@ -58,7 +48,7 @@
       "label": "设置关节位姿",
       "target": "client",
       "background": false,
-      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate robot && python control/set_joint_positions.py --preset {joint_preset}"
+      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate robot && python control/set_joint_positions.py"
     },
     "start_inference_client": {
       "label": "启动推理客户端",

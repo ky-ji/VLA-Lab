@@ -330,14 +330,12 @@ def eval_static_image(path: str, dir_path: Optional[str] = None) -> FileResponse
 def deploy_overview(
     model_server_config_path: Optional[str] = None,
     inference_client_config_path: Optional[str] = None,
-    joint_preset: Optional[str] = None,
 ) -> DeployOverviewResponse:
     try:
         return build_deploy_overview(
             {
                 "model_server_config_path": model_server_config_path,
                 "inference_client_config_path": inference_client_config_path,
-                "joint_preset": joint_preset,
             },
         )
     except FileNotFoundError as exc:

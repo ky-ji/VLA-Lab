@@ -260,7 +260,7 @@ def _launch_web_services(
         frontend_env = env.copy()
         api_base_url = f"http://127.0.0.1:{api_port}"
         frontend_env["VLALAB_API_BASE_URL"] = api_base_url
-        frontend_env["NEXT_PUBLIC_VLALAB_API_BASE_URL"] = api_base_url
+        frontend_env.pop("NEXT_PUBLIC_VLALAB_API_BASE_URL", None)
 
         if install or not (web_dir / "node_modules").exists():
             console.print("[blue]Installing frontend dependencies in web/...[/blue]")

@@ -47,13 +47,6 @@ def _base_config():
                 "required": True,
                 "target": "client",
             },
-            "joint_preset": {
-                "label": "Joint Preset",
-                "type": "enum",
-                "required": True,
-                "default": "home",
-                "options": ["home", "ready"],
-            },
         },
         "commands": {
             "start_model_server": {
@@ -76,7 +69,7 @@ def _base_config():
                 "label": "Set Joint Preset",
                 "target": "client",
                 "background": False,
-                "template": "python control/set_joint_positions.py --preset {joint_preset}",
+                "template": "python control/set_joint_positions.py",
             },
             "start_inference_client": {
                 "label": "Start Inference Client",
@@ -121,7 +114,6 @@ def test_load_deploy_config_accepts_valid_dashboard(tmp_path):
     assert list(config.inputs.keys()) == [
         "model_server_config_path",
         "inference_client_config_path",
-        "joint_preset",
     ]
     assert list(config.commands.keys()) == [
         "start_model_server",
@@ -130,8 +122,7 @@ def test_load_deploy_config_accepts_valid_dashboard(tmp_path):
         "start_inference_client",
     ]
     assert config.commands["start_model_server"].required_inputs == ("model_server_config_path",)
-    assert config.commands["set_joint_preset"].required_inputs == ("joint_preset",)
-    assert config.inputs["joint_preset"].default == "home"
+    assert config.commands["set_joint_preset"].required_inputs == ()
 
 
 def test_load_deploy_config_rejects_missing_required_placeholder(tmp_path):
@@ -157,19 +148,18 @@ def test_build_deploy_overview_returns_fixed_sections(tmp_path, monkeypatch):
         {
             "model_server_config_path": "/remote/server.yaml",
             "inference_client_config_path": "/remote/client.yaml",
-            "joint_preset": "ready",
         }
     )
 
     assert len(overview.targets) == 2
     assert all(target.connected for target in overview.targets)
-    assert len(overview.inputs) == 3
+    assert len(overview.inputs) == 2
     assert len(overview.commands) == 4
     assert overview.jobs == []
     command_map = {command.id: command for command in overview.commands}
     assert "/remote/server.yaml" in command_map["start_model_server"].resolved_preview
     assert "/remote/client.yaml" in command_map["start_inference_client"].resolved_preview
-    assert "ready" in command_map["set_joint_preset"].resolved_preview
+    assert command_map["set_joint_preset"].resolved_preview.endswith("python control/set_joint_positions.py")
 
 
 def test_submit_command_requires_missing_inputs(tmp_path):
@@ -247,7 +237,7 @@ def test_foreground_command_records_stdout_and_success(tmp_path, monkeypatch):
         response = controller.submit_command(
             DeployRunRequest(
                 command_id="set_joint_preset",
-                values={"joint_preset": "home"},
+                values={},
             )
         )
         assert response.job.state == "success"

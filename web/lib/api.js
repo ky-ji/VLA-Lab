@@ -1,10 +1,13 @@
-const DEFAULT_API_BASE =
+const SERVER_API_BASE =
   process.env.VLALAB_API_BASE_URL ||
   process.env.NEXT_PUBLIC_VLALAB_API_BASE_URL ||
   "http://127.0.0.1:8000";
 
+const BROWSER_API_BASE = process.env.NEXT_PUBLIC_VLALAB_API_BASE_URL || "";
+
 export function getApiBase() {
-  return DEFAULT_API_BASE.replace(/\/$/, "");
+  const rawBase = typeof window === "undefined" ? SERVER_API_BASE : BROWSER_API_BASE;
+  return String(rawBase || "").replace(/\/$/, "");
 }
 
 export function toPublicApiUrl(path) {
@@ -18,7 +21,8 @@ export function toPublicApiUrl(path) {
 }
 
 function buildUrl(path, params = {}) {
-  const url = new URL(path, `${getApiBase()}/`);
+  const base = getApiBase();
+  const url = new URL(path, base ? `${base}/` : "http://vlalab.local");
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") {
       continue;
@@ -32,6 +36,9 @@ function buildUrl(path, params = {}) {
       continue;
     }
     url.searchParams.set(key, value);
+  }
+  if (!base) {
+    return `${url.pathname}${url.search}`;
   }
   return url.toString();
 }

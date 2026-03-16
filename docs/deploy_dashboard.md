@@ -10,10 +10,9 @@
   - `start_robot_server`
   - `set_joint_preset`
   - `start_inference_client`
-- 固定 3 个输入：
+- 固定 2 个输入：
   - `model_server_config_path`
   - `inference_client_config_path`
-  - `joint_preset`
 - 页面加载时自动做 SSH 健康检查
 - 点击按钮后由后端线程异步执行命令，并展示最近 job、远端 PID、stdout/stderr 摘要
 
@@ -58,13 +57,6 @@ deploy 只读取一个 JSON 配置文件，优先级如下：
       "type": "path",
       "required": true,
       "target": "client"
-    },
-    "joint_preset": {
-      "label": "Joint Preset",
-      "type": "enum",
-      "required": true,
-      "default": "home",
-      "options": ["home", "ready"]
     }
   },
   "commands": {
@@ -88,7 +80,7 @@ deploy 只读取一个 JSON 配置文件，优先级如下：
       "label": "设置关节位姿",
       "target": "client",
       "background": false,
-      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate robot && python control/set_joint_positions.py --preset {joint_preset}"
+      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate robot && python control/set_joint_positions.py"
     },
     "start_inference_client": {
       "label": "启动推理客户端",
@@ -105,10 +97,9 @@ deploy 只读取一个 JSON 配置文件，优先级如下：
 ## 配置约束
 
 - `targets` 必须同时包含 `server` 和 `client`
-- `inputs` 必须同时包含 `model_server_config_path`、`inference_client_config_path`、`joint_preset`
+- `inputs` 必须同时包含 `model_server_config_path`、`inference_client_config_path`
 - `commands` 必须同时包含 4 个固定命令 ID
 - `start_model_server` 模板必须包含 `{model_server_config_path}`
-- `set_joint_preset` 模板必须包含 `{joint_preset}`
 - `start_inference_client` 模板必须包含 `{inference_client_config_path}`
 - 所有后台命令必须同时提供 `stdout_log` 和 `stderr_log`
 
@@ -141,7 +132,7 @@ vlalab serve --no-frontend --deploy-config configs/deploy/dashboard.json
 新的 dashboard 固定只展示四块内容：
 
 - 两台机器的 SSH 连接状态
-- 3 个输入参数
+- 2 个输入参数
 - 4 个固定命令按钮
 - 最近 jobs 与日志摘要
 
@@ -158,7 +149,7 @@ vlalab serve --no-frontend --deploy-config configs/deploy/dashboard.json
 
 1. 先确认 dashboard 主机能无密码 SSH 到 `server` 和 `client`
 2. 按实际环境修改 `configs/deploy/dashboard.json`
-3. 把两条带 `config_path` 的值填写为目标机器上的远端路径
+3. 把两条 `config_path` 的值填写为目标机器上的远端路径
 4. 通过 `/deploy` 页面直接启动 realworld deploy 流程
 
 如果后续命令入口有变化，优先修改 JSON 配置中的 `template`，而不是再改前端按钮或后端接口。

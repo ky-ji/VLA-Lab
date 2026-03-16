@@ -28,7 +28,7 @@ from .models import (
 )
 
 TARGET_ORDER = ("server", "client")
-INPUT_ORDER = ("model_server_config_path", "inference_client_config_path", "joint_preset")
+INPUT_ORDER = ("model_server_config_path", "inference_client_config_path")
 COMMAND_ORDER = (
     "start_model_server",
     "start_robot_server",
@@ -38,7 +38,7 @@ COMMAND_ORDER = (
 COMMAND_REQUIRED_PLACEHOLDERS = {
     "start_model_server": {"model_server_config_path"},
     "start_robot_server": set(),
-    "set_joint_preset": {"joint_preset"},
+    "set_joint_preset": set(),
     "start_inference_client": {"inference_client_config_path"},
 }
 PLACEHOLDER_PATTERN = re.compile(r"(?<!\$)\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
@@ -200,8 +200,6 @@ def load_deploy_config(config_path: Optional[str] = None) -> DeployConfig:
             if target not in TARGET_ORDER:
                 raise ValueError(f"Path input `{input_id}` must define `target` as `server` or `client`")
         elif input_type == "enum":
-            if input_id == "joint_preset" and not normalized_options:
-                normalized_options = ("home", "ready")
             if not normalized_options:
                 raise ValueError(f"Enum input `{input_id}` must define at least one option")
             if default is None:

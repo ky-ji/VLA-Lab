@@ -2,7 +2,11 @@
 
 import { useEffect, useState, useTransition } from "react";
 
-import { getDeployJobs, getDeployOverview, runDeployCommand } from "@/lib/api";
+import { browserFetchJson, runDeployCommand } from "@/lib/api";
+
+const DEPLOY_FORM_STORAGE_KEY = "vlalab.deploy.form.v1";
+const DEPLOY_INPUT_HISTORY_KEY = "vlalab.deploy.input-history.v1";
+const MAX_HISTORY_PER_FIELD = 8;
 
 const EMPTY_OVERVIEW = {
   refreshed_at: "",
@@ -57,6 +61,34 @@ function pruneValues(values) {
   );
 }
 
+function loadStoredObject(key) {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function rememberValue(history, fieldId, value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return history;
+  }
+  const current = Array.isArray(history?.[fieldId]) ? history[fieldId] : [];
+  return {
+    ...history,
+    [fieldId]: [normalized, ...current.filter((item) => item !== normalized)].slice(0, MAX_HISTORY_PER_FIELD),
+  };
+}
+
 function formatTime(value) {
   if (!value) return "--";
   try {
@@ -98,7 +130,7 @@ function ConnectionCard({ target }) {
   );
 }
 
-function InputField({ spec, value, onChange }) {
+function InputField({ spec, value, history, onChange, onCommit }) {
   if (spec.type === "enum") {
     return (
       <label>
@@ -114,15 +146,26 @@ function InputField({ spec, value, onChange }) {
     );
   }
 
+  const datalistId = `deploy-history-${spec.id}`;
+
   return (
     <label className="deploy-field-span">
       <span className="stat-label">{spec.label}</span>
       <input
         type="text"
+        list={history?.length ? datalistId : undefined}
         value={value || ""}
         onChange={(event) => onChange(spec.id, event.target.value)}
-        placeholder={spec.type === "path" ? "/remote/path/to/config" : ""}
+        onBlur={(event) => onCommit(spec.id, event.target.value)}
+        placeholder={spec.default || (spec.type === "path" ? "/remote/path/to/config" : "")}
       />
+      {history?.length ? (
+        <datalist id={datalistId}>
+          {history.map((item) => (
+            <option key={item} value={item} />
+          ))}
+        </datalist>
+      ) : null}
     </label>
   );
 }
@@ -251,7 +294,16 @@ export default function DeployDashboardClient({ initialOverview }) {
   const seededOverview = initialOverview || EMPTY_OVERVIEW;
   const [overview, setOverview] = useState(seededOverview);
   const [jobs, setJobs] = useState(seededOverview.jobs || []);
-  const [form, setForm] = useState(buildInitialForm(seededOverview));
+  const [form, setForm] = useState(() =>
+    mergeFormWithInputs(
+      {
+        ...buildInitialForm(seededOverview),
+        ...loadStoredObject(DEPLOY_FORM_STORAGE_KEY),
+      },
+      seededOverview.inputs
+    )
+  );
+  const [inputHistory, setInputHistory] = useState(() => loadStoredObject(DEPLOY_INPUT_HISTORY_KEY));
   const [errorText, setErrorText] = useState("");
   const [flashMessage, setFlashMessage] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -263,26 +315,63 @@ export default function DeployDashboardClient({ initialOverview }) {
   }, [overview.inputs]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(DEPLOY_FORM_STORAGE_KEY, JSON.stringify(form));
+  }, [form]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(DEPLOY_INPUT_HISTORY_KEY, JSON.stringify(inputHistory));
+  }, [inputHistory]);
+
+  async function fetchDeployState(values) {
+    const [overviewResult, jobsResult] = await Promise.allSettled([
+      browserFetchJson("/api/deploy/overview", values),
+      browserFetchJson("/api/deploy/jobs"),
+    ]);
+
+    if (overviewResult.status !== "fulfilled") {
+      throw overviewResult.reason;
+    }
+
+    const nextOverview = overviewResult.value;
+    const nextJobs =
+      jobsResult.status === "fulfilled"
+        ? jobsResult.value?.jobs || []
+        : nextOverview?.jobs || [];
+
+    return {
+      overview: nextOverview,
+      jobs: nextJobs,
+      jobsError: jobsResult.status === "rejected" ? jobsResult.reason : null,
+    };
+  }
+
+  useEffect(() => {
     let active = true;
 
     async function poll() {
-      const values = pruneValues(form);
-      const [nextOverview, nextJobs] = await Promise.all([getDeployOverview(values), getDeployJobs()]);
       if (!active) {
         return;
       }
-      if (!nextOverview) {
-        setErrorText("无法读取 deploy 状态，请确认 API 已启动且 deploy 配置有效。");
-        return;
-      }
-      setErrorText("");
-      if (nextOverview) {
-        setOverview(nextOverview);
-      }
-      if (nextJobs?.jobs) {
-        setJobs(nextJobs.jobs);
-      } else if (nextOverview?.jobs) {
-        setJobs(nextOverview.jobs);
+      try {
+        const values = pruneValues(form);
+        const snapshot = await fetchDeployState(values);
+        if (!active) {
+          return;
+        }
+        setOverview(snapshot.overview);
+        setJobs(snapshot.jobs);
+        setErrorText(snapshot.jobsError?.message || "");
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setErrorText(error.message || "无法读取 deploy 状态，请确认 API 已启动且 deploy 配置有效。");
       }
     }
 
@@ -292,21 +381,22 @@ export default function DeployDashboardClient({ initialOverview }) {
       active = false;
       window.clearInterval(timer);
     };
-  }, [form.model_server_config_path, form.inference_client_config_path, form.joint_preset]);
+  }, [form.model_server_config_path, form.inference_client_config_path]);
 
   async function refreshNow() {
     setIsRefreshing(true);
     setErrorText("");
-    const values = pruneValues(form);
-    const [nextOverview, nextJobs] = await Promise.all([getDeployOverview(values), getDeployJobs()]);
-    if (!nextOverview) {
-      setErrorText("无法读取 deploy 状态，请确认 vlalab API 已启动。");
+    try {
+      const values = pruneValues(form);
+      const snapshot = await fetchDeployState(values);
+      setOverview(snapshot.overview);
+      setJobs(snapshot.jobs);
+      setErrorText(snapshot.jobsError?.message || "");
+    } catch (error) {
+      setErrorText(error.message || "无法读取 deploy 状态，请确认 vlalab API 已启动。");
+    } finally {
       setIsRefreshing(false);
-      return;
     }
-    setOverview(nextOverview);
-    setJobs(nextJobs?.jobs || nextOverview.jobs || []);
-    setIsRefreshing(false);
   }
 
   function updateField(key, value) {
@@ -316,25 +406,31 @@ export default function DeployDashboardClient({ initialOverview }) {
     }));
   }
 
+  function commitFieldValue(key, value) {
+    setInputHistory((current) => rememberValue(current, key, value));
+  }
+
   function handleRun(commandId) {
     setErrorText("");
     setFlashMessage("");
     setActiveCommandId(commandId);
+    const currentValues = pruneValues(form);
+
+    for (const [key, value] of Object.entries(currentValues)) {
+      commitFieldValue(key, value);
+    }
 
     startTransition(async () => {
       try {
-        const response = await runDeployCommand(commandId, pruneValues(form));
+        const response = await runDeployCommand(commandId, currentValues);
         setFlashMessage(response.message || "命令已提交");
         if (response.job) {
           setJobs((current) => [response.job, ...current.filter((item) => item.id !== response.job.id)]);
         }
-        const [nextOverview, nextJobs] = await Promise.all([getDeployOverview(pruneValues(form)), getDeployJobs()]);
-        if (nextOverview) {
-          setOverview(nextOverview);
-        }
-        if (nextJobs?.jobs) {
-          setJobs(nextJobs.jobs);
-        }
+        const snapshot = await fetchDeployState(currentValues);
+        setOverview(snapshot.overview);
+        setJobs(snapshot.jobs);
+        setErrorText(snapshot.jobsError?.message || "");
       } catch (error) {
         setErrorText(error.message || "命令执行失败");
       } finally {
@@ -420,7 +516,9 @@ export default function DeployDashboardClient({ initialOverview }) {
               key={input.id}
               spec={input}
               value={form[input.id] || ""}
+              history={inputHistory[input.id] || []}
               onChange={updateField}
+              onCommit={commitFieldValue}
             />
           ))}
         </div>
