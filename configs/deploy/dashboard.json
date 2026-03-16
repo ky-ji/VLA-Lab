@@ -32,7 +32,7 @@
       "label": "启动模型服务",
       "target": "server",
       "background": true,
-      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate groot && uv run python inference_server_groot.py --config {model_server_config_path}",
+      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && uv run python inference_server_groot.py --config {model_server_config_path}",
       "stdout_log": "/tmp/vlalab/start_model_server.stdout.log",
       "stderr_log": "/tmp/vlalab/start_model_server.stderr.log"
     },
