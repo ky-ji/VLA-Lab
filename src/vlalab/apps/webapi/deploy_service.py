@@ -358,6 +358,11 @@ class DeployController:
         normalized_shell = str(shell or "bash -lc").strip() or "bash -lc"
         return f"{normalized_shell} {shlex.quote(script)}"
 
+    def _shell_program(self, shell: str) -> str:
+        normalized_shell = str(shell or "bash -lc").strip() or "bash -lc"
+        argv = shlex.split(normalized_shell)
+        return argv[0] if argv else "bash"
+
     def _run_ssh_script(
         self,
         target: TargetConfig,
@@ -370,6 +375,7 @@ class DeployController:
             command,
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
             timeout=timeout,
             check=False,
         )
@@ -386,6 +392,7 @@ class DeployController:
             command,
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
             timeout=timeout,
             check=False,
         )
@@ -398,6 +405,7 @@ class DeployController:
                 command,
                 capture_output=True,
                 text=True,
+                stdin=subprocess.DEVNULL,
                 timeout=5.0,
                 check=False,
             )
@@ -498,6 +506,10 @@ class DeployController:
             return f"{command.stdout_log}.{job_id}.status"
         return f"/tmp/vlalab/{job_id}.status"
 
+    def _launcher_path_for_job(self, command: CommandConfig, job_id: str) -> str:
+        command_slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", command.id).strip("._") or "deploy"
+        return f"/tmp/vlalab/{command_slug}.{job_id}.launcher.sh"
+
     def _validate_values_for_command(self, command: CommandConfig, values: Dict[str, Any]) -> Dict[str, str]:
         merged = self._merge_values_with_defaults(values)
         missing = [item for item in command.required_inputs if item not in merged]
@@ -578,29 +590,41 @@ class DeployController:
         stdout_log = str(command.stdout_log)
         stderr_log = str(command.stderr_log)
         status_path = str(self._jobs[job_id]["_status_path"])
+        launcher_path = self._launcher_path_for_job(command, job_id)
         quoted_workdir = shlex.quote(target.workdir)
         quoted_stdout = shlex.quote(stdout_log)
         quoted_stderr = shlex.quote(stderr_log)
         quoted_status = shlex.quote(status_path)
+        quoted_launcher = shlex.quote(launcher_path)
         mkdir_dirs = {
             str(Path(stdout_log).parent),
             str(Path(stderr_log).parent),
             str(Path(status_path).parent),
+            str(Path(launcher_path).parent),
         }
         mkdir_script = "mkdir -p " + " ".join(shlex.quote(item) for item in sorted(mkdir_dirs))
-        execution_script = (
-            f"if ! cd {quoted_workdir}; then "
-            f"code=$?; printf '%s\\n%s\\n' \"$code\" \"$(date -Iseconds)\" > {quoted_status}; exit \"$code\"; "
-            f"fi; "
-            f"{rendered_command}; "
-            f"code=$?; printf '%s\\n%s\\n' \"$code\" \"$(date -Iseconds)\" > {quoted_status}; exit \"$code\""
+        launcher_body = "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                f"trap 'rm -f {quoted_launcher}' EXIT",
+                f"if ! cd {quoted_workdir}; then",
+                f"  code=$?; printf '%s\\n%s\\n' \"$code\" \"$(date -Iseconds)\" > {quoted_status}; exit \"$code\"",
+                "fi",
+                rendered_command,
+                f"code=$?; printf '%s\\n%s\\n' \"$code\" \"$(date -Iseconds)\" > {quoted_status}; exit \"$code\"",
+            ]
         )
+        heredoc_tag = f"__VLALAB_LAUNCHER_{job_id.upper()}__"
         remote_script = (
-            f"{mkdir_script} && "
-            f": > {quoted_stdout} && "
-            f": > {quoted_stderr} && "
-            f"rm -f {quoted_status} && "
-            f"nohup {self._shell_command(target.shell, execution_script)} "
+            f"{mkdir_script}\n"
+            f"cat > {quoted_launcher} <<'{heredoc_tag}'\n"
+            f"{launcher_body}\n"
+            f"{heredoc_tag}\n"
+            f"chmod +x {quoted_launcher}\n"
+            f": > {quoted_stdout}\n"
+            f": > {quoted_stderr}\n"
+            f"rm -f {quoted_status}\n"
+            f"nohup {shlex.quote(self._shell_program(target.shell))} {quoted_launcher} "
             f">{quoted_stdout} 2>{quoted_stderr} < /dev/null & echo $!"
         )
 
