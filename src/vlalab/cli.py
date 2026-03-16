@@ -4,6 +4,7 @@ VLA-Lab Command Line Interface
 Commands:
 - vlalab view: Launch the default visualization app
 - vlalab serve: Launch the FastAPI backend and optional Next.js frontend
+- vlalab deploy-agent: Launch a config-driven remote deploy agent
 - vlalab convert: Convert old log formats to VLA-Lab run format
 - vlalab init-run: Initialize a new run directory
 - vlalab info: Show information about a run
@@ -208,6 +209,7 @@ def _launch_web_services(
     frontend: bool,
     install: bool,
     run_dir: str,
+    deploy_config: str,
 ):
     """Launch the FastAPI backend and optional Next.js frontend."""
     import time
@@ -225,6 +227,8 @@ def _launch_web_services(
     env = os.environ.copy()
     if run_dir:
         env["VLALAB_DIR"] = str(Path(run_dir).resolve())
+    if deploy_config:
+        env["VLALAB_DEPLOY_CONFIG"] = str(Path(deploy_config).resolve())
 
     api_cmd = [
         sys.executable,
@@ -336,7 +340,13 @@ def main():
     "--run-dir", "-r", default=None, type=click.Path(exists=True),
     help="Default run directory to load"
 )
-def view(port: Optional[int], api_port: int, host: str, install: bool, run_dir: str):
+@click.option(
+    "--deploy-config",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to the SSH-backed deploy dashboard JSON config",
+)
+def view(port: Optional[int], api_port: int, host: str, install: bool, run_dir: str, deploy_config: str):
     """Launch the default VLA-Lab viewer."""
     resolved_port = port if port is not None else 3000
 
@@ -347,6 +357,7 @@ def view(port: Optional[int], api_port: int, host: str, install: bool, run_dir: 
         frontend=True,
         install=install,
         run_dir=run_dir,
+        deploy_config=deploy_config,
     )
 
 
@@ -368,7 +379,13 @@ def view(port: Optional[int], api_port: int, host: str, install: bool, run_dir: 
     "--run-dir", "-r", default=None, type=click.Path(exists=True),
     help="Override the VLALAB_DIR used by the API"
 )
-def serve(host: str, api_port: int, web_port: int, frontend: bool, install: bool, run_dir: str):
+@click.option(
+    "--deploy-config",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to the SSH-backed deploy dashboard JSON config",
+)
+def serve(host: str, api_port: int, web_port: int, frontend: bool, install: bool, run_dir: str, deploy_config: str):
     """Launch the FastAPI backend and optional Next.js frontend."""
     _launch_web_services(
         host=host,
@@ -377,6 +394,7 @@ def serve(host: str, api_port: int, web_port: int, frontend: bool, install: bool
         frontend=frontend,
         install=install,
         run_dir=run_dir,
+        deploy_config=deploy_config,
     )
 
 
@@ -407,6 +425,22 @@ def kill(port: int, force: bool):
             console.print(f"[green]Cleaned up stale PID file[/green]")
         else:
             console.print(f"[green]Port {port} is not in use[/green]")
+
+
+@main.command("deploy-agent")
+@click.option(
+    "--config", "-c", "config_path", required=True, type=click.Path(exists=True),
+    help="Path to the deploy-agent JSON config"
+)
+@click.option("--host", default="0.0.0.0", help="Host for the deploy agent")
+@click.option("--port", default=9001, type=int, help="Port for the deploy agent")
+def deploy_agent(config_path: str, host: str, port: int):
+    """Launch a config-driven deploy agent for remote server/client orchestration."""
+    from vlalab.deploy import serve_agent
+
+    console.print(f"[green]Starting deploy agent[/green]: {config_path}")
+    console.print(f"[green]Listening[/green]: http://{host}:{port}")
+    serve_agent(config_path=config_path, host=host, port=port)
 
 
 @main.command()

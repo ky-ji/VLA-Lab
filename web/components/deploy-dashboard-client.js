@@ -1,0 +1,479 @@
+"use client";
+
+import { useEffect, useState, useTransition } from "react";
+
+import { getDeployJobs, getDeployOverview, runDeployCommand } from "@/lib/api";
+
+const EMPTY_OVERVIEW = {
+  refreshed_at: "",
+  targets: [],
+  inputs: [],
+  commands: [],
+  jobs: [],
+};
+
+function prettyState(state) {
+  if (!state) return "Unknown";
+  return String(state)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function prettyKey(value) {
+  return String(value || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function stateToneClass(state) {
+  if (!state) return "is-neutral";
+  if (["running", "queued"].includes(state)) return "is-running";
+  if (["success", "connected", "ready"].includes(state)) return "is-ready";
+  if (["failed", "disconnected"].includes(state)) return "is-offline";
+  return "is-neutral";
+}
+
+function buildInitialForm(overview) {
+  const next = {};
+  for (const input of overview?.inputs || []) {
+    next[input.id] = input.default || "";
+  }
+  return next;
+}
+
+function mergeFormWithInputs(current, inputs) {
+  const next = { ...current };
+  for (const input of inputs || []) {
+    if (!(input.id in next) || next[input.id] === undefined || next[input.id] === null) {
+      next[input.id] = input.default || "";
+    }
+  }
+  return next;
+}
+
+function pruneValues(values) {
+  return Object.fromEntries(
+    Object.entries(values || {}).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "")
+  );
+}
+
+function formatTime(value) {
+  if (!value) return "--";
+  try {
+    return new Date(value).toLocaleString();
+  } catch (error) {
+    return value;
+  }
+}
+
+function ConnectionCard({ target }) {
+  return (
+    <article className="deploy-target-card">
+      <div className="deploy-target-header">
+        <div>
+          <p className="eyebrow">{target.id}</p>
+          <h3>{target.label}</h3>
+        </div>
+        <span className={`deploy-status-chip ${stateToneClass(target.connected ? "connected" : "disconnected")}`}>
+          {target.connected ? "Connected" : "Disconnected"}
+        </span>
+      </div>
+      <div className="deploy-meta-list">
+        <div className="deploy-meta-row">
+          <span className="stat-label">Target</span>
+          <span>{target.id}</span>
+        </div>
+        <div className="deploy-meta-row">
+          <span className="stat-label">Status</span>
+          <span>{target.connected ? "SSH reachable" : "SSH unavailable"}</span>
+        </div>
+        {target.last_error ? (
+          <div className="deploy-meta-row is-error">
+            <span className="stat-label">Error</span>
+            <span>{target.last_error}</span>
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function InputField({ spec, value, onChange }) {
+  if (spec.type === "enum") {
+    return (
+      <label>
+        <span className="stat-label">{spec.label}</span>
+        <select value={value || ""} onChange={(event) => onChange(spec.id, event.target.value)}>
+          {(spec.options || []).map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
+  return (
+    <label className="deploy-field-span">
+      <span className="stat-label">{spec.label}</span>
+      <input
+        type="text"
+        value={value || ""}
+        onChange={(event) => onChange(spec.id, event.target.value)}
+        placeholder={spec.type === "path" ? "/remote/path/to/config" : ""}
+      />
+    </label>
+  );
+}
+
+function CommandCard({ command, target, missingInputs, busy, onRun }) {
+  const isDisconnected = !target?.connected;
+  const isRunning = busy;
+  let state = "ready";
+  let summary = "Ready to run";
+
+  if (isRunning) {
+    state = "running";
+    summary = "A job for this command is already running";
+  } else if (isDisconnected) {
+    state = "disconnected";
+    summary = target?.last_error || "SSH target is not reachable";
+  } else if (missingInputs.length) {
+    state = "queued";
+    summary = `Missing inputs: ${missingInputs.map((item) => prettyKey(item)).join(", ")}`;
+  }
+
+  return (
+    <article className="deploy-runbook-card">
+      <div className="deploy-runbook-head">
+        <div>
+          <p className="eyebrow">{target?.label || command.target_id}</p>
+          <h3>{command.label}</h3>
+        </div>
+        <span className={`deploy-status-chip ${stateToneClass(state)}`}>{prettyState(state)}</span>
+      </div>
+      <pre className="deploy-command-block">{command.resolved_preview || "No preview available"}</pre>
+      <div className="deploy-command-meta">
+        <div>
+          <span className="stat-label">Mode</span>
+          <code>{command.background ? "background" : "foreground"}</code>
+        </div>
+        <div>
+          <span className="stat-label">Inputs</span>
+          <code>{command.required_inputs?.length ? command.required_inputs.join(", ") : "--"}</code>
+        </div>
+        <div>
+          <span className="stat-label">Target</span>
+          <code>{command.target_id}</code>
+        </div>
+      </div>
+      <p className="muted">{summary}</p>
+      {missingInputs.length ? (
+        <div className="deploy-manual-hint">缺少参数: {missingInputs.map((item) => prettyKey(item)).join(", ")}</div>
+      ) : null}
+      <div className="deploy-action-row">
+        <button
+          type="button"
+          className="deploy-action-button is-primary"
+          onClick={() => onRun(command.id)}
+          disabled={isDisconnected || missingInputs.length > 0 || isRunning}
+        >
+          运行命令
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function JobCard({ job, targetLabel }) {
+  return (
+    <article className="deploy-workflow-card">
+      <div className="deploy-target-header">
+        <div>
+          <p className="eyebrow">{targetLabel}</p>
+          <h3>{prettyKey(job.command_id)}</h3>
+        </div>
+        <span className={`deploy-status-chip ${stateToneClass(job.state)}`}>{prettyState(job.state)}</span>
+      </div>
+      <div className="deploy-meta-list">
+        <div className="deploy-meta-row">
+          <span className="stat-label">Job ID</span>
+          <code>{job.id}</code>
+        </div>
+        <div className="deploy-meta-row">
+          <span className="stat-label">Remote PID</span>
+          <span>{job.remote_pid || "--"}</span>
+        </div>
+        <div className="deploy-meta-row">
+          <span className="stat-label">Submitted</span>
+          <span>{formatTime(job.submitted_at)}</span>
+        </div>
+        <div className="deploy-meta-row">
+          <span className="stat-label">Started</span>
+          <span>{formatTime(job.started_at)}</span>
+        </div>
+        <div className="deploy-meta-row">
+          <span className="stat-label">Finished</span>
+          <span>{formatTime(job.finished_at)}</span>
+        </div>
+        {job.error ? (
+          <div className="deploy-meta-row is-error">
+            <span className="stat-label">Error</span>
+            <span>{job.error}</span>
+          </div>
+        ) : null}
+      </div>
+
+      {(job.stdout_log || job.stderr_log) ? (
+        <div className="deploy-command-meta">
+          <div>
+            <span className="stat-label">stdout</span>
+            <code>{job.stdout_log || "--"}</code>
+          </div>
+          <div>
+            <span className="stat-label">stderr</span>
+            <code>{job.stderr_log || "--"}</code>
+          </div>
+        </div>
+      ) : null}
+
+      {job.last_stdout ? <pre className="deploy-command-block is-output">{job.last_stdout}</pre> : null}
+      {job.last_stderr ? <pre className="deploy-command-block is-output is-error">{job.last_stderr}</pre> : null}
+      {!job.last_stdout && !job.last_stderr ? (
+        <div className="empty-panel deploy-empty-panel">当前暂无日志输出</div>
+      ) : null}
+    </article>
+  );
+}
+
+export default function DeployDashboardClient({ initialOverview }) {
+  const seededOverview = initialOverview || EMPTY_OVERVIEW;
+  const [overview, setOverview] = useState(seededOverview);
+  const [jobs, setJobs] = useState(seededOverview.jobs || []);
+  const [form, setForm] = useState(buildInitialForm(seededOverview));
+  const [errorText, setErrorText] = useState("");
+  const [flashMessage, setFlashMessage] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [activeCommandId, setActiveCommandId] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setForm((current) => mergeFormWithInputs(current, overview.inputs));
+  }, [overview.inputs]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function poll() {
+      const values = pruneValues(form);
+      const [nextOverview, nextJobs] = await Promise.all([getDeployOverview(values), getDeployJobs()]);
+      if (!active) {
+        return;
+      }
+      if (!nextOverview) {
+        setErrorText("无法读取 deploy 状态，请确认 API 已启动且 deploy 配置有效。");
+        return;
+      }
+      setErrorText("");
+      if (nextOverview) {
+        setOverview(nextOverview);
+      }
+      if (nextJobs?.jobs) {
+        setJobs(nextJobs.jobs);
+      } else if (nextOverview?.jobs) {
+        setJobs(nextOverview.jobs);
+      }
+    }
+
+    poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [form.model_server_config_path, form.inference_client_config_path, form.joint_preset]);
+
+  async function refreshNow() {
+    setIsRefreshing(true);
+    setErrorText("");
+    const values = pruneValues(form);
+    const [nextOverview, nextJobs] = await Promise.all([getDeployOverview(values), getDeployJobs()]);
+    if (!nextOverview) {
+      setErrorText("无法读取 deploy 状态，请确认 vlalab API 已启动。");
+      setIsRefreshing(false);
+      return;
+    }
+    setOverview(nextOverview);
+    setJobs(nextJobs?.jobs || nextOverview.jobs || []);
+    setIsRefreshing(false);
+  }
+
+  function updateField(key, value) {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  function handleRun(commandId) {
+    setErrorText("");
+    setFlashMessage("");
+    setActiveCommandId(commandId);
+
+    startTransition(async () => {
+      try {
+        const response = await runDeployCommand(commandId, pruneValues(form));
+        setFlashMessage(response.message || "命令已提交");
+        if (response.job) {
+          setJobs((current) => [response.job, ...current.filter((item) => item.id !== response.job.id)]);
+        }
+        const [nextOverview, nextJobs] = await Promise.all([getDeployOverview(pruneValues(form)), getDeployJobs()]);
+        if (nextOverview) {
+          setOverview(nextOverview);
+        }
+        if (nextJobs?.jobs) {
+          setJobs(nextJobs.jobs);
+        }
+      } catch (error) {
+        setErrorText(error.message || "命令执行失败");
+      } finally {
+        setActiveCommandId("");
+      }
+    });
+  }
+
+  const targets = overview.targets || [];
+  const commands = overview.commands || [];
+  const inputs = overview.inputs || [];
+  const targetMap = Object.fromEntries(targets.map((target) => [target.id, target]));
+  const connectedCount = targets.filter((target) => target.connected).length;
+  const runningJobs = jobs.filter((job) => ["queued", "running"].includes(job.state)).length;
+  const successfulJobs = jobs.filter((job) => job.state === "success").length;
+
+  return (
+    <div className="section-stack">
+      <section className="hero-panel deploy-hero">
+        <div className="hero-copy">
+          <p className="eyebrow">Deploy Console</p>
+          <h1>RealWorld Deploy Dashboard</h1>
+          <p className="hero-desc">
+            这个版本只负责 2 台机器的 SSH 连接、4 条固定命令的后台执行，以及日志与 PID 状态展示。
+          </p>
+          <div className="hero-actions">
+            <button type="button" className="button-link deploy-inline-button is-secondary" onClick={refreshNow} disabled={isRefreshing}>
+              {isRefreshing ? "刷新中..." : "立即刷新"}
+            </button>
+            <span className="deploy-refresh-note">
+              最近刷新 {overview?.refreshed_at ? new Date(overview.refreshed_at).toLocaleTimeString() : "--"}
+            </span>
+          </div>
+        </div>
+        <aside className="hero-aside">
+          <div className="metric-grid">
+            <div className="metric-card">
+              <span className="stat-label">Connected Targets</span>
+              <strong>{connectedCount}</strong>
+            </div>
+            <div className="metric-card">
+              <span className="stat-label">Commands</span>
+              <strong>{commands.length}</strong>
+            </div>
+            <div className="metric-card">
+              <span className="stat-label">Running Jobs</span>
+              <strong>{runningJobs}</strong>
+            </div>
+            <div className="metric-card">
+              <span className="stat-label">Successful Jobs</span>
+              <strong>{successfulJobs}</strong>
+            </div>
+          </div>
+          {flashMessage ? <div className="deploy-banner is-success">{flashMessage}</div> : null}
+          {errorText ? <div className="deploy-banner is-error">{errorText}</div> : null}
+        </aside>
+      </section>
+
+      <section className="section-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Connections</p>
+            <h2>两台目标机器自动连接检查</h2>
+          </div>
+        </div>
+        <div className="deploy-target-grid">
+          {targets.map((target) => (
+            <ConnectionCard key={target.id} target={target} />
+          ))}
+        </div>
+      </section>
+
+      <section className="section-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Inputs</p>
+            <h2>固定输入参数</h2>
+          </div>
+        </div>
+        <div className="deploy-form-grid">
+          {inputs.map((input) => (
+            <InputField
+              key={input.id}
+              spec={input}
+              value={form[input.id] || ""}
+              onChange={updateField}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="section-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Commands</p>
+            <h2>固定四个部署命令</h2>
+          </div>
+        </div>
+        <div className="deploy-runbook-grid">
+          {commands.map((command) => {
+            const missingInputs = (command.required_inputs || []).filter((key) => !String(form[key] || "").trim());
+            const busy = jobs.some(
+              (job) => job.command_id === command.id && ["queued", "running"].includes(job.state)
+            );
+            return (
+              <CommandCard
+                key={command.id}
+                command={command}
+                target={targetMap[command.target_id]}
+                missingInputs={missingInputs}
+                busy={busy || (isPending && activeCommandId === command.id)}
+                onRun={handleRun}
+              />
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="section-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Jobs</p>
+            <h2>最近执行记录与日志</h2>
+          </div>
+        </div>
+        <div className="deploy-workflow-grid">
+          {jobs.length ? (
+            jobs.map((job) => (
+              <JobCard
+                key={job.id}
+                job={job}
+                targetLabel={targetMap[job.target_id]?.label || job.target_id}
+              />
+            ))
+          ) : (
+            <div className="empty-panel deploy-empty-panel">还没有任何 deploy job。</div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

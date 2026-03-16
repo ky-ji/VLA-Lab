@@ -104,3 +104,75 @@ class LatencyCompareItem(BaseModel):
 class LatencyCompareResponse(BaseModel):
     items: List[LatencyCompareItem]
 
+
+class DeployTargetConnection(BaseModel):
+    id: str
+    label: str
+    connected: bool = False
+    last_error: Optional[str] = None
+
+
+class DeployInputSpec(BaseModel):
+    id: str
+    label: str
+    type: str
+    required: bool = True
+    default: Optional[str] = None
+    options: List[str] = Field(default_factory=list)
+
+
+class DeployCommandSpec(BaseModel):
+    id: str
+    label: str
+    target_id: str
+    background: bool = False
+    required_inputs: List[str] = Field(default_factory=list)
+    resolved_preview: str = ""
+
+
+class DeployJob(BaseModel):
+    id: str
+    command_id: str
+    target_id: str
+    state: str
+    remote_pid: Optional[int] = None
+    stdout_log: Optional[str] = None
+    stderr_log: Optional[str] = None
+    last_stdout: Optional[str] = None
+    last_stderr: Optional[str] = None
+    submitted_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error: Optional[str] = None
+
+
+class DeployOverviewResponse(BaseModel):
+    refreshed_at: str
+    targets: List[DeployTargetConnection] = Field(default_factory=list)
+    inputs: List[DeployInputSpec] = Field(default_factory=list)
+    commands: List[DeployCommandSpec] = Field(default_factory=list)
+    jobs: List[DeployJob] = Field(default_factory=list)
+
+
+class DeployRunRequest(BaseModel):
+    command_id: str
+    values: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DeployRunResponse(BaseModel):
+    ok: bool
+    message: str
+    job: DeployJob
+
+
+class DeployJobsResponse(BaseModel):
+    refreshed_at: str
+    jobs: List[DeployJob] = Field(default_factory=list)
+
+
+class DeployJobLogsResponse(BaseModel):
+    job_id: str
+    stream: str
+    path: Optional[str] = None
+    content: str = ""
+    updated_at: str

@@ -1,0 +1,45 @@
+{
+  "agent_id": "server",
+  "label": "Model Server Agent",
+  "role": "model-server",
+  "details": {
+    "machine": "server-01",
+    "notes": "Replace commands with your own inference-server entrypoints."
+  },
+  "state_dir": "./.agent_state/server",
+  "processes": {
+    "policy_server": {
+      "command": [
+        "python",
+        "run_policy_server.py",
+        "--checkpoint",
+        "{checkpoint_path}"
+      ],
+      "cwd": "./realworld_deploy/server",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "healthcheck_url": "http://127.0.0.1:5555/health",
+      "startup_grace_sec": 5,
+      "stop_timeout_sec": 10
+    }
+  },
+  "actions": {
+    "status": {
+      "type": "status",
+      "label": "Refresh Status"
+    },
+    "start_server": {
+      "type": "managed_process",
+      "process": "policy_server",
+      "operation": "start",
+      "label": "Start Server"
+    },
+    "stop_server": {
+      "type": "managed_process",
+      "process": "policy_server",
+      "operation": "stop",
+      "label": "Stop Server"
+    }
+  }
+}

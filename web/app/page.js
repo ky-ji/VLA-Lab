@@ -25,6 +25,9 @@ export default async function HomePage() {
             统一管理推理日志、时延分析、数据集浏览与开环评估，减少排查成本。
           </p>
           <div className="hero-actions">
+            <Link href="/deploy" className="button-link">
+              部署总控
+            </Link>
             <Link href="/runs" className="button-link">
               浏览 Runs
             </Link>
@@ -98,6 +101,10 @@ export default async function HomePage() {
           </div>
         </div>
         <div className="feature-grid">
+          <Link href="/deploy" className="feature-card feature-card-link">
+            <h3>部署总控</h3>
+            <p>统一查看 server / client 状态，一键启动服务、设置位姿并触发推理客户端。</p>
+          </Link>
           <Link href="/runs" className="feature-card feature-card-link">
             <h3>推理日志</h3>
             <p>浏览项目和 run 列表，逐帧回放、轨迹分析与 attention 可视化。</p>

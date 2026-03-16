@@ -1,0 +1,68 @@
+{
+  "agent_id": "client",
+  "label": "RealWorld GR00T Client",
+  "role": "robot-client",
+  "details": {
+    "stack": "RealWorld-GR00T",
+    "machine_role": "robot-client",
+    "default_root": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy",
+    "joint_preset_behavior": "Both `home` and `ready` currently reuse control/set_joint_positions.py.",
+    "inference_mode": "Uses `client_mode` from the dashboard and maps to `python inference_client.py -m ssh/local`."
+  },
+  "state_dir": "./.agent_state/realworld_groot_client",
+  "processes": {
+    "polymetis_server": {
+      "command": "source \"${VLALAB_CONDA_SH:-/opt/miniconda3/etc/profile.d/conda.sh}\" && conda activate robot && python /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/robot_inference/control/start_server.py",
+      "shell": true,
+      "stdout_log": "./logs/realworld_groot_polymetis.stdout.log",
+      "stderr_log": "./logs/realworld_groot_polymetis.stderr.log",
+      "startup_grace_sec": 6,
+      "stop_timeout_sec": 12
+    },
+    "inference_client": {
+      "command": "source \"${VLALAB_CONDA_SH:-/opt/miniconda3/etc/profile.d/conda.sh}\" && conda activate robot && python /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/robot_inference/inference_client.py -m \"{client_mode}\"",
+      "shell": true,
+      "stdout_log": "./logs/realworld_groot_client.stdout.log",
+      "stderr_log": "./logs/realworld_groot_client.stderr.log",
+      "startup_grace_sec": 4,
+      "stop_timeout_sec": 10
+    }
+  },
+  "actions": {
+    "status": {
+      "type": "status",
+      "label": "Refresh Status"
+    },
+    "start_server": {
+      "type": "managed_process",
+      "process": "polymetis_server",
+      "operation": "start",
+      "label": "Start Robot Server"
+    },
+    "stop_server": {
+      "type": "managed_process",
+      "process": "polymetis_server",
+      "operation": "stop",
+      "label": "Stop Robot Server"
+    },
+    "set_joint_preset": {
+      "type": "command",
+      "label": "Set Joint Preset",
+      "shell": true,
+      "timeout_sec": 120,
+      "command": "source \"${VLALAB_CONDA_SH:-/opt/miniconda3/etc/profile.d/conda.sh}\" && conda activate robot && case \"{joint_preset}\" in home|ready) python /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/robot_inference/control/set_joint_positions.py ;; *) echo \"Unsupported joint_preset: {joint_preset}. Supported presets: home, ready\" >&2; exit 2 ;; esac"
+    },
+    "start_inference_client": {
+      "type": "managed_process",
+      "process": "inference_client",
+      "operation": "start",
+      "label": "Start Inference Client"
+    },
+    "stop_inference_client": {
+      "type": "managed_process",
+      "process": "inference_client",
+      "operation": "stop",
+      "label": "Stop Inference Client"
+    }
+  }
+}

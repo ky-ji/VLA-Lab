@@ -1,0 +1,90 @@
+{
+  "action": "status",
+  "executed_at": "2026-03-16T17:14:49.688372",
+  "message": "Agent ready",
+  "ok": true,
+  "params": {},
+  "result": {
+    "actions": [
+      "status",
+      "start_server",
+      "stop_server"
+    ],
+    "details": {
+      "action_catalog": {
+        "start_server": {
+          "label": "Start Model Server",
+          "name": "start_server",
+          "operation": "start",
+          "process": "groot_policy_server",
+          "process_spec": {
+            "command": "cd \"/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T\" && uv run python /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/inference_server_groot.py",
+            "cwd": null,
+            "healthcheck_url": null,
+            "shell": true,
+            "stderr_log": "./logs/realworld_groot_server.stderr.log",
+            "stdout_log": "./logs/realworld_groot_server.stdout.log"
+          },
+          "type": "managed_process"
+        },
+        "status": {
+          "label": "Refresh Status",
+          "name": "status",
+          "type": "status"
+        },
+        "stop_server": {
+          "label": "Stop Model Server",
+          "name": "stop_server",
+          "operation": "stop",
+          "process": "groot_policy_server",
+          "process_spec": {
+            "command": "cd \"/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T\" && uv run python /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/inference_server_groot.py",
+            "cwd": null,
+            "healthcheck_url": null,
+            "shell": true,
+            "stderr_log": "./logs/realworld_groot_server.stderr.log",
+            "stdout_log": "./logs/realworld_groot_server.stdout.log"
+          },
+          "type": "managed_process"
+        }
+      },
+      "agent_id": "server",
+      "config_path": "/data3/jikangye/workspace/baselines/vla-baselines/VLA-Lab/configs/deploy/realworld_groot_server_agent.json",
+      "hostname": "iv-yecuw2k6io5i3z327ilk",
+      "last_actions": {
+        "start_server": {},
+        "status": {},
+        "stop_server": {}
+      },
+      "machine_role": "gpu-server",
+      "notes": "Runs the exact uv command provided for the GPU server.",
+      "processes": {
+        "groot_policy_server": {
+          "command": null,
+          "configured_command": "cd \"/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T\" && uv run python /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/inference_server_groot.py",
+          "configured_cwd": null,
+          "configured_stderr_log": "/data3/jikangye/workspace/baselines/vla-baselines/VLA-Lab/configs/deploy/logs/realworld_groot_server.stderr.log",
+          "configured_stdout_log": "/data3/jikangye/workspace/baselines/vla-baselines/VLA-Lab/configs/deploy/logs/realworld_groot_server.stdout.log",
+          "cwd": null,
+          "health": null,
+          "healthcheck_url": null,
+          "last_params": null,
+          "pid": null,
+          "running": false,
+          "started_at": null,
+          "state": "stopped",
+          "stderr_log": null,
+          "stdout_log": null
+        }
+      },
+      "project_root": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T",
+      "server_entry": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/inference_server_groot.py",
+      "stack": "RealWorld-GR00T",
+      "state_dir": "/data3/jikangye/workspace/baselines/vla-baselines/VLA-Lab/configs/deploy/.agent_state/realworld_groot_server"
+    },
+    "message": "Agent ready",
+    "ok": true,
+    "state": "ready",
+    "summary": "Agent ready"
+  }
+}

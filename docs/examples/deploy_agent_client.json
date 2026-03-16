@@ -1,0 +1,59 @@
+{
+  "agent_id": "client",
+  "label": "Robot Client Agent",
+  "role": "robot-client",
+  "details": {
+    "machine": "client-01",
+    "robot": "franka",
+    "notes": "Replace commands with your own robot preset + inference-client scripts."
+  },
+  "state_dir": "./.agent_state/client",
+  "processes": {
+    "inference_client": {
+      "command": [
+        "python",
+        "run_inference_client.py",
+        "--run-name",
+        "{run_name}",
+        "--task-prompt",
+        "{task_prompt}"
+      ],
+      "cwd": "./realworld_deploy/client",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "startup_grace_sec": 3,
+      "stop_timeout_sec": 10
+    }
+  },
+  "actions": {
+    "status": {
+      "type": "status",
+      "label": "Refresh Status"
+    },
+    "set_joint_preset": {
+      "type": "command",
+      "label": "Set Joint Preset",
+      "command": [
+        "python",
+        "move_robot_to_preset.py",
+        "--preset",
+        "{joint_preset}"
+      ],
+      "cwd": "./realworld_deploy/client",
+      "timeout_sec": 120
+    },
+    "start_inference_client": {
+      "type": "managed_process",
+      "process": "inference_client",
+      "operation": "start",
+      "label": "Start Inference Client"
+    },
+    "stop_inference_client": {
+      "type": "managed_process",
+      "process": "inference_client",
+      "operation": "stop",
+      "label": "Stop Inference Client"
+    }
+  }
+}

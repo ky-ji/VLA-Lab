@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
   { href: "/", label: "总览" },
+  { href: "/deploy", label: "部署" },
   { href: "/runs", label: "Runs" },
   { href: "/latency", label: "时延" },
   { href: "/datasets", label: "数据集" },
