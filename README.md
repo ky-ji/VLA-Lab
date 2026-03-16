@@ -6,7 +6,7 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.1-orange.svg)](https://pypi.org/project/vlalab/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.1.2-orange.svg)](https://pypi.org/project/vlalab/)
 
 **Log · Replay · Analyze · Evaluate** — All-in-one toolkit for real-world VLA deployment
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vlalab"
-version = "0.1.1"
+version = "0.1.2"
 description = "A toolbox for tracking and visualizing the real-world deployment process of VLA models"
 readme = "README.md"
 license = {text = "MIT"}

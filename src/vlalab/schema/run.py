@@ -74,7 +74,7 @@ class RunMeta:
     total_duration_s: Optional[float] = None
     
     # Version info
-    vlalab_version: str = "0.1.0"
+    vlalab_version: str = "0.1.2"
     framework_version: Optional[str] = None
     
     # Extra fields
@@ -146,7 +146,7 @@ class RunMeta:
             end_time=data.get("end_time"),
             total_steps=data.get("total_steps", 0),
             total_duration_s=data.get("total_duration_s"),
-            vlalab_version=data.get("vlalab_version", "0.1.0"),
+            vlalab_version=data.get("vlalab_version", "0.1.2"),
             framework_version=data.get("framework_version"),
             extra=data.get("extra", {}),
         )
