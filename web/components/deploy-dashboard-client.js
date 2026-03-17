@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
-import { browserFetchJson, runDeployCommand } from "@/lib/api";
+import { browserFetchJson, runDeployCommand, saveDeployInputs, stopDeployJob } from "@/lib/api";
 
 const DEPLOY_FORM_STORAGE_KEY = "vlalab.deploy.form.v1";
 const DEPLOY_INPUT_HISTORY_KEY = "vlalab.deploy.input-history.v1";
@@ -40,7 +40,7 @@ function stateToneClass(state) {
 function buildInitialForm(overview) {
   const next = {};
   for (const input of overview?.inputs || []) {
-    next[input.id] = input.default || "";
+    next[input.id] = input.current_value ?? input.default ?? "";
   }
   return next;
 }
@@ -170,15 +170,20 @@ function InputField({ spec, value, history, onChange, onCommit }) {
   );
 }
 
-function CommandCard({ command, target, missingInputs, busy, onRun }) {
+function CommandCard({ command, target, missingInputs, busy, activeJob, stopping, onRun, onStop }) {
   const isDisconnected = !target?.connected;
   const isRunning = busy;
   let state = "ready";
   let summary = "Ready to run";
 
   if (isRunning) {
-    state = "running";
-    summary = "A job for this command is already running";
+    state = activeJob?.state || "running";
+    summary =
+      activeJob?.state === "stopping"
+        ? "Stopping current job"
+        : activeJob?.id
+          ? `Job ${activeJob.id} is in progress`
+          : "A job for this command is already running";
   } else if (isDisconnected) {
     state = "disconnected";
     summary = target?.last_error || "SSH target is not reachable";
@@ -224,12 +229,22 @@ function CommandCard({ command, target, missingInputs, busy, onRun }) {
         >
           运行命令
         </button>
+        {activeJob?.stoppable ? (
+          <button
+            type="button"
+            className="deploy-action-button is-danger"
+            onClick={() => onStop(activeJob.id)}
+            disabled={stopping}
+          >
+            {stopping ? "停止中..." : "停止命令"}
+          </button>
+        ) : null}
       </div>
     </article>
   );
 }
 
-function JobCard({ job, targetLabel }) {
+function JobCard({ job, targetLabel, stopping, onStop }) {
   return (
     <article className="deploy-workflow-card">
       <div className="deploy-target-header">
@@ -281,17 +296,50 @@ function JobCard({ job, targetLabel }) {
         </div>
       ) : null}
 
-      {job.last_stdout ? <pre className="deploy-command-block is-output">{job.last_stdout}</pre> : null}
-      {job.last_stderr ? <pre className="deploy-command-block is-output is-error">{job.last_stderr}</pre> : null}
-      {!job.last_stdout && !job.last_stderr ? (
-        <div className="empty-panel deploy-empty-panel">当前暂无日志输出</div>
-      ) : null}
+      <div className="deploy-action-row">
+        {job.stoppable ? (
+          <button
+            type="button"
+            className="deploy-action-button is-danger"
+            onClick={() => onStop(job.id)}
+            disabled={stopping}
+          >
+            {stopping ? "停止中..." : "停止命令"}
+          </button>
+        ) : (
+          <span className="muted">当前任务不可停止</span>
+        )}
+      </div>
+
+      <div className="deploy-log-stack">
+        <div className="deploy-log-panel">
+          <div className="deploy-log-header">
+            <span className="stat-label">stdout</span>
+          </div>
+          {job.last_stdout ? (
+            <pre className="deploy-command-block is-output is-scrollable">{job.last_stdout}</pre>
+          ) : (
+            <div className="empty-panel deploy-empty-panel deploy-log-empty">stdout 暂无输出</div>
+          )}
+        </div>
+        <div className="deploy-log-panel">
+          <div className="deploy-log-header">
+            <span className="stat-label">stderr</span>
+          </div>
+          {job.last_stderr ? (
+            <pre className="deploy-command-block is-output is-error is-scrollable">{job.last_stderr}</pre>
+          ) : (
+            <div className="empty-panel deploy-empty-panel deploy-log-empty">stderr 暂无输出</div>
+          )}
+        </div>
+      </div>
     </article>
   );
 }
 
 export default function DeployDashboardClient({ initialOverview }) {
   const seededOverview = initialOverview || EMPTY_OVERVIEW;
+  const importInputRef = useRef(null);
   const [overview, setOverview] = useState(seededOverview);
   const [jobs, setJobs] = useState(seededOverview.jobs || []);
   const [form, setForm] = useState(() =>
@@ -307,7 +355,9 @@ export default function DeployDashboardClient({ initialOverview }) {
   const [errorText, setErrorText] = useState("");
   const [flashMessage, setFlashMessage] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSavingInputs, setIsSavingInputs] = useState(false);
   const [activeCommandId, setActiveCommandId] = useState("");
+  const [stoppingJobId, setStoppingJobId] = useState("");
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -406,8 +456,29 @@ export default function DeployDashboardClient({ initialOverview }) {
     }));
   }
 
+  async function persistInputs(nextValues, successMessage = "") {
+    setIsSavingInputs(true);
+    try {
+      const response = await saveDeployInputs(nextValues);
+      if (successMessage) {
+        setFlashMessage(successMessage);
+      }
+      return response?.values || nextValues;
+    } catch (error) {
+      setErrorText(error.message || "输入参数保存失败");
+      return nextValues;
+    } finally {
+      setIsSavingInputs(false);
+    }
+  }
+
   function commitFieldValue(key, value) {
     setInputHistory((current) => rememberValue(current, key, value));
+    const nextValues = {
+      ...form,
+      [key]: value,
+    };
+    void persistInputs(nextValues);
   }
 
   function handleRun(commandId) {
@@ -439,12 +510,80 @@ export default function DeployDashboardClient({ initialOverview }) {
     });
   }
 
+  async function handleStop(jobId) {
+    setErrorText("");
+    setFlashMessage("");
+    setStoppingJobId(jobId);
+    try {
+      const response = await stopDeployJob(jobId);
+      setFlashMessage(response.message || "停止请求已发送");
+      if (response.job) {
+        setJobs((current) => [response.job, ...current.filter((item) => item.id !== response.job.id)]);
+      }
+      await refreshNow();
+    } catch (error) {
+      setErrorText(error.message || "停止命令失败");
+    } finally {
+      setStoppingJobId("");
+    }
+  }
+
+  function handleExportJson() {
+    const payload = JSON.stringify(pruneValues(form), null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "vlalab-deploy-inputs.json";
+    anchor.click();
+    window.URL.revokeObjectURL(url);
+  }
+
+  function handleOpenImport() {
+    importInputRef.current?.click();
+  }
+
+  async function handleImportJson(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object") {
+        throw new Error("JSON 内容必须是对象");
+      }
+
+      const allowedKeys = new Set((overview.inputs || []).map((item) => item.id));
+      const nextValues = { ...form };
+      const nextHistory = { ...inputHistory };
+
+      for (const [key, value] of Object.entries(parsed)) {
+        if (!allowedKeys.has(key)) {
+          continue;
+        }
+        const normalized = String(value ?? "").trim();
+        nextValues[key] = normalized;
+        nextHistory[key] = rememberValue(nextHistory, key, normalized)[key] || nextHistory[key] || [];
+      }
+
+      setForm(nextValues);
+      setInputHistory(nextHistory);
+      await persistInputs(nextValues, "JSON 配置已导入");
+      await refreshNow();
+    } catch (error) {
+      setErrorText(error.message || "JSON 导入失败");
+    }
+  }
+
   const targets = overview.targets || [];
   const commands = overview.commands || [];
   const inputs = overview.inputs || [];
   const targetMap = Object.fromEntries(targets.map((target) => [target.id, target]));
   const connectedCount = targets.filter((target) => target.connected).length;
-  const runningJobs = jobs.filter((job) => ["queued", "running"].includes(job.state)).length;
+  const runningJobs = jobs.filter((job) => ["queued", "running", "stopping"].includes(job.state)).length;
   const successfulJobs = jobs.filter((job) => job.state === "success").length;
 
   return (
@@ -509,6 +648,23 @@ export default function DeployDashboardClient({ initialOverview }) {
             <p className="eyebrow">Inputs</p>
             <h2>固定输入参数</h2>
           </div>
+          <div className="deploy-action-row">
+            <button
+              type="button"
+              className="deploy-action-button is-ghost"
+              onClick={() => persistInputs(form, "输入参数已保存")}
+              disabled={isSavingInputs}
+            >
+              {isSavingInputs ? "保存中..." : "保存记忆"}
+            </button>
+            <button type="button" className="deploy-action-button is-ghost" onClick={handleExportJson}>
+              导出 JSON
+            </button>
+            <button type="button" className="deploy-action-button is-ghost" onClick={handleOpenImport}>
+              导入 JSON
+            </button>
+            <input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={handleImportJson} />
+          </div>
         </div>
         <div className="deploy-form-grid">
           {inputs.map((input) => (
@@ -534,8 +690,8 @@ export default function DeployDashboardClient({ initialOverview }) {
         <div className="deploy-runbook-grid">
           {commands.map((command) => {
             const missingInputs = (command.required_inputs || []).filter((key) => !String(form[key] || "").trim());
-            const busy = jobs.some(
-              (job) => job.command_id === command.id && ["queued", "running"].includes(job.state)
+            const activeJob = jobs.find(
+              (job) => job.command_id === command.id && ["queued", "running", "stopping"].includes(job.state)
             );
             return (
               <CommandCard
@@ -543,8 +699,11 @@ export default function DeployDashboardClient({ initialOverview }) {
                 command={command}
                 target={targetMap[command.target_id]}
                 missingInputs={missingInputs}
-                busy={busy || (isPending && activeCommandId === command.id)}
+                busy={Boolean(activeJob) || (isPending && activeCommandId === command.id)}
+                activeJob={activeJob}
+                stopping={stoppingJobId === activeJob?.id}
                 onRun={handleRun}
+                onStop={handleStop}
               />
             );
           })}
@@ -565,6 +724,8 @@ export default function DeployDashboardClient({ initialOverview }) {
                 key={job.id}
                 job={job}
                 targetLabel={targetMap[job.target_id]?.label || job.target_id}
+                stopping={stoppingJobId === job.id}
+                onStop={handleStop}
               />
             ))
           ) : (

@@ -118,6 +118,7 @@ class DeployInputSpec(BaseModel):
     type: str
     required: bool = True
     default: Optional[str] = None
+    current_value: Optional[str] = None
     options: List[str] = Field(default_factory=list)
 
 
@@ -144,6 +145,7 @@ class DeployJob(BaseModel):
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     error: Optional[str] = None
+    stoppable: bool = False
 
 
 class DeployOverviewResponse(BaseModel):
@@ -165,6 +167,16 @@ class DeployRunResponse(BaseModel):
     job: DeployJob
 
 
+class DeployInputValuesRequest(BaseModel):
+    values: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DeployInputValuesResponse(BaseModel):
+    ok: bool
+    message: str
+    values: Dict[str, str] = Field(default_factory=dict)
+
+
 class DeployJobsResponse(BaseModel):
     refreshed_at: str
     jobs: List[DeployJob] = Field(default_factory=list)
@@ -176,3 +188,9 @@ class DeployJobLogsResponse(BaseModel):
     path: Optional[str] = None
     content: str = ""
     updated_at: str
+
+
+class DeployStopResponse(BaseModel):
+    ok: bool
+    message: str
+    job: DeployJob

@@ -6,10 +6,11 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +44,7 @@ COMMAND_REQUIRED_PLACEHOLDERS = {
 }
 PLACEHOLDER_PATTERN = re.compile(r"(?<!\$)\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 OUTPUT_LIMIT_CHARS = 4000
+INPUT_VALUES_FILENAME = "input_values.json"
 
 _CONTROLLER: Optional["DeployController"] = None
 _CONTROLLER_SIG: Optional[Tuple[str, int]] = None
@@ -273,8 +275,13 @@ class DeployController:
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="deploy-job")
         self._stop_event = threading.Event()
         self._jobs: Dict[str, Dict[str, Any]] = {}
+        self._futures: Dict[str, Future[Any]] = {}
+        self._local_processes: Dict[str, subprocess.Popen[str]] = {}
+        self._input_values_path = self.config.state_dir / INPUT_VALUES_FILENAME
+        self._input_values: Dict[str, str] = {}
         self._jobs_dir = self.config.state_dir / "jobs"
         self._jobs_dir.mkdir(parents=True, exist_ok=True)
+        self._load_input_values()
         self._load_jobs()
         self._monitor_thread = threading.Thread(
             target=self._monitor_loop,
@@ -287,6 +294,10 @@ class DeployController:
         self._stop_event.set()
         if self._monitor_thread.is_alive():
             self._monitor_thread.join(timeout=1.0)
+        with self._lock:
+            local_job_ids = list(self._local_processes.keys())
+        for job_id in local_job_ids:
+            self._terminate_local_process(job_id, sig=signal.SIGTERM)
         self._executor.shutdown(wait=False, cancel_futures=False)
 
     def _job_path(self, job_id: str) -> Path:
@@ -296,6 +307,30 @@ class DeployController:
         path = self._job_path(str(job["id"]))
         with open(path, "w") as handle:
             json.dump(job, handle, indent=2, sort_keys=True)
+
+    def _persist_input_values(self) -> None:
+        self._input_values_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._input_values_path, "w") as handle:
+            json.dump(self._input_values, handle, indent=2, sort_keys=True)
+
+    def _load_input_values(self) -> None:
+        if not self._input_values_path.exists():
+            self._input_values = {}
+            return
+        try:
+            payload = _load_json(self._input_values_path)
+        except Exception:
+            self._input_values = {}
+            return
+        normalized: Dict[str, str] = {}
+        for input_id in INPUT_ORDER:
+            value = payload.get(input_id)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                normalized[input_id] = text
+        self._input_values = normalized
 
     def _load_jobs(self) -> None:
         for path in sorted(self._jobs_dir.glob("*.json")):
@@ -309,11 +344,12 @@ class DeployController:
             self._jobs[job_id] = payload
 
     def _public_job(self, payload: Dict[str, Any]) -> DeployJob:
+        state = str(payload.get("state") or "queued")
         return DeployJob(
             id=str(payload.get("id")),
             command_id=str(payload.get("command_id")),
             target_id=str(payload.get("target_id")),
-            state=str(payload.get("state") or "queued"),
+            state=state,
             remote_pid=int(payload["remote_pid"]) if payload.get("remote_pid") not in {None, ""} else None,
             stdout_log=payload.get("stdout_log"),
             stderr_log=payload.get("stderr_log"),
@@ -323,6 +359,7 @@ class DeployController:
             started_at=payload.get("started_at"),
             finished_at=payload.get("finished_at"),
             error=payload.get("error"),
+            stoppable=state in {"queued", "running", "stopping"},
         )
 
     def list_jobs(self) -> List[DeployJob]:
@@ -335,7 +372,7 @@ class DeployController:
             job_ids = [
                 job_id
                 for job_id, payload in self._jobs.items()
-                if payload.get("_background") and str(payload.get("state")) == "running"
+                if payload.get("_background") and str(payload.get("state")) in {"running", "stopping"}
             ]
         for job_id in job_ids:
             self._refresh_background_job(job_id)
@@ -397,6 +434,21 @@ class DeployController:
             check=False,
         )
 
+    def _spawn_ssh_script(
+        self,
+        target: TargetConfig,
+        script: str,
+    ) -> subprocess.Popen[str]:
+        command = self._ssh_prefix(target.ssh_host) + [self._shell_command(target.shell, script)]
+        return subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
     def probe_target(self, target_id: str) -> DeployTargetConnection:
         target = self.config.targets[target_id]
         command = self._ssh_prefix(target.ssh_host, connect_timeout=3) + ["echo __vlalab_ok__"]
@@ -430,6 +482,7 @@ class DeployController:
         )
 
     def input_specs(self) -> List[DeployInputSpec]:
+        merged_values = self._merge_values_with_defaults({})
         items: List[DeployInputSpec] = []
         for input_id in INPUT_ORDER:
             spec = self.config.inputs[input_id]
@@ -440,6 +493,7 @@ class DeployController:
                     type=spec.type,
                     required=spec.required,
                     default=spec.default,
+                    current_value=merged_values.get(spec.id, spec.default),
                     options=list(spec.options),
                 )
             )
@@ -450,13 +504,34 @@ class DeployController:
         raw_values = values or {}
         for input_id in INPUT_ORDER:
             spec = self.config.inputs[input_id]
-            raw = raw_values.get(input_id, spec.default)
+            raw = raw_values.get(input_id, self._input_values.get(input_id, spec.default))
             if raw is None:
                 continue
             text = str(raw).strip()
             if text:
                 merged[input_id] = text
         return merged
+
+    def get_saved_values(self) -> Dict[str, str]:
+        with self._lock:
+            return dict(self._merge_values_with_defaults({}))
+
+    def save_input_values(self, values: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        with self._lock:
+            next_values = dict(self._input_values)
+            raw_values = values or {}
+            for input_id in INPUT_ORDER:
+                if input_id not in raw_values:
+                    continue
+                raw = raw_values.get(input_id)
+                text = str(raw).strip() if raw is not None else ""
+                if text:
+                    next_values[input_id] = text
+                else:
+                    next_values.pop(input_id, None)
+            self._input_values = next_values
+            self._persist_input_values()
+            return dict(self._input_values)
 
     def _render_template(
         self,
@@ -523,6 +598,7 @@ class DeployController:
             raise ValueError(f"Unknown deploy command: {payload.command_id}")
 
         values = self._validate_values_for_command(command, payload.values)
+        self.save_input_values(values)
         target_status = self.probe_target(command.target_id)
         if not target_status.connected:
             raise RuntimeError(target_status.last_error or f"Target `{command.target_id}` is not reachable")
@@ -547,12 +623,94 @@ class DeployController:
             "_ssh_host": self.config.targets[command.target_id].ssh_host,
             "_status_path": status_path,
             "_values": values,
+            "_stop_requested": False,
         }
         with self._lock:
             self._jobs[job_id] = job
             self._persist_job(job)
-        self._executor.submit(self._execute_job, job_id)
+        future = self._executor.submit(self._execute_job, job_id)
+        with self._lock:
+            if future is not None:
+                self._futures[job_id] = future
         return DeployRunResponse(ok=True, message=f"{command.label} 已提交", job=self._public_job(job))
+
+    def _set_job_stopped(self, job_id: str, message: Optional[str] = None) -> Optional[DeployJob]:
+        with self._lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                return None
+            current["state"] = "stopped"
+            current["finished_at"] = current.get("finished_at") or _now_iso()
+            current["error"] = message
+            current["_stop_requested"] = True
+            self._persist_job(current)
+            return self._public_job(current)
+
+    def _terminate_local_process(self, job_id: str, *, sig: int = signal.SIGTERM) -> bool:
+        with self._lock:
+            proc = self._local_processes.get(job_id)
+        if proc is None or proc.poll() is not None:
+            return False
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            return False
+        except Exception:
+            try:
+                proc.send_signal(sig)
+            except Exception:
+                return False
+        return True
+
+    def _stop_remote_process(self, ssh_host: str, remote_pid: int) -> None:
+        pid = int(remote_pid)
+        script = (
+            f"kill -TERM -- -{pid} >/dev/null 2>&1 || kill -TERM {pid} >/dev/null 2>&1 || true\n"
+            "sleep 1\n"
+            f"kill -0 -- -{pid} >/dev/null 2>&1 && kill -KILL -- -{pid} >/dev/null 2>&1 || true\n"
+            f"kill -0 {pid} >/dev/null 2>&1 && kill -KILL {pid} >/dev/null 2>&1 || true"
+        )
+        self._run_ssh_host(ssh_host, script, timeout=10.0)
+
+    def stop_job(self, job_id: str) -> DeployJob:
+        with self._lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                raise ValueError(f"Unknown deploy job: {job_id}")
+            if str(current.get("state")) not in {"queued", "running", "stopping"}:
+                raise ValueError(f"Deploy job `{job_id}` is not running")
+            current["_stop_requested"] = True
+            current["state"] = "stopping" if current.get("started_at") else "queued"
+            self._persist_job(current)
+            future = self._futures.get(job_id)
+            ssh_host = str(current.get("_ssh_host") or "")
+            remote_pid = current.get("remote_pid")
+
+        if future is not None and future.cancel():
+            stopped = self._set_job_stopped(job_id, "Stopped before execution")
+            if stopped is not None:
+                return stopped
+
+        local_stopped = self._terminate_local_process(job_id, sig=signal.SIGTERM)
+        if remote_pid not in {None, ""} and ssh_host:
+            try:
+                self._stop_remote_process(ssh_host, int(remote_pid))
+            except Exception:
+                pass
+
+        if not local_stopped and remote_pid in {None, ""}:
+            stopped = self._set_job_stopped(job_id, "Stop requested")
+            if stopped is not None:
+                return stopped
+
+        with self._lock:
+            latest = self._jobs.get(job_id)
+            if latest is None:
+                raise ValueError(f"Unknown deploy job: {job_id}")
+            latest["state"] = "stopping"
+            latest["error"] = "Stopping..."
+            self._persist_job(latest)
+            return self._public_job(latest)
 
     def _execute_job(self, job_id: str) -> None:
         with self._lock:
@@ -560,11 +718,13 @@ class DeployController:
         if not job:
             return
 
-        command = self.config.commands[job["command_id"]]
-        target = self.config.targets[job["target_id"]]
-        values = dict(job.get("_values") or {})
-
         try:
+            if job.get("_stop_requested"):
+                self._set_job_stopped(job_id, "Stopped before execution")
+                return
+            command = self.config.commands[job["command_id"]]
+            target = self.config.targets[job["target_id"]]
+            values = dict(job.get("_values") or {})
             if command.background:
                 self._start_background_job(job_id, command, target, values)
             else:
@@ -574,10 +734,18 @@ class DeployController:
                 current = self._jobs.get(job_id)
                 if current is None:
                     return
-                current["state"] = "failed"
-                current["error"] = str(exc)
-                current["finished_at"] = _now_iso()
+                if current.get("_stop_requested"):
+                    current["state"] = "stopped"
+                    current["error"] = current.get("error") or "Stopped"
+                    current["finished_at"] = current.get("finished_at") or _now_iso()
+                else:
+                    current["state"] = "failed"
+                    current["error"] = str(exc)
+                    current["finished_at"] = _now_iso()
                 self._persist_job(current)
+        finally:
+            with self._lock:
+                self._futures.pop(job_id, None)
 
     def _start_background_job(
         self,
@@ -624,7 +792,7 @@ class DeployController:
             f": > {quoted_stdout}\n"
             f": > {quoted_stderr}\n"
             f"rm -f {quoted_status}\n"
-            f"nohup {shlex.quote(self._shell_program(target.shell))} {quoted_launcher} "
+            f"nohup setsid {shlex.quote(self._shell_program(target.shell))} {quoted_launcher} "
             f">{quoted_stdout} 2>{quoted_stderr} < /dev/null & echo $!"
         )
 
@@ -632,6 +800,7 @@ class DeployController:
             current = self._jobs.get(job_id)
             if current is not None:
                 current["started_at"] = _now_iso()
+                current["state"] = "running"
                 self._persist_job(current)
 
         result = self._run_ssh_script(target, remote_script, timeout=30.0)
@@ -655,6 +824,13 @@ class DeployController:
             current["last_stderr"] = ""
             current["error"] = None
             self._persist_job(current)
+            stop_requested = bool(current.get("_stop_requested"))
+
+        if stop_requested:
+            try:
+                self._stop_remote_process(target.ssh_host, int(pid_text))
+            except Exception:
+                pass
 
     def _run_foreground_job(
         self,
@@ -673,20 +849,36 @@ class DeployController:
                 current["started_at"] = _now_iso()
                 self._persist_job(current)
 
-        result = self._run_ssh_script(target, remote_script, timeout=300.0)
+        proc = self._spawn_ssh_script(target, remote_script)
+        with self._lock:
+            self._local_processes[job_id] = proc
+
+        try:
+            stdout_text, stderr_text = proc.communicate(timeout=300.0)
+        except subprocess.TimeoutExpired:
+            self._terminate_local_process(job_id, sig=signal.SIGKILL)
+            stdout_text, stderr_text = proc.communicate()
+            raise RuntimeError(f"Foreground command `{command.id}` timed out after 300s")
+        finally:
+            with self._lock:
+                self._local_processes.pop(job_id, None)
+
         with self._lock:
             current = self._jobs.get(job_id)
             if current is None:
                 return
-            current["last_stdout"] = _trim_output(result.stdout or "")
-            current["last_stderr"] = _trim_output(result.stderr or "")
+            current["last_stdout"] = _trim_output(stdout_text or "")
+            current["last_stderr"] = _trim_output(stderr_text or "")
             current["finished_at"] = _now_iso()
-            if result.returncode == 0:
+            if current.get("_stop_requested"):
+                current["state"] = "stopped"
+                current["error"] = current.get("error") or "Stopped"
+            elif proc.returncode == 0:
                 current["state"] = "success"
                 current["error"] = None
             else:
                 current["state"] = "failed"
-                current["error"] = _trim_output((result.stderr or result.stdout or "").strip())
+                current["error"] = _trim_output((stderr_text or stdout_text or "").strip())
             self._persist_job(current)
 
     def _is_remote_pid_alive(self, ssh_host: str, remote_pid: int) -> bool:
@@ -754,6 +946,9 @@ class DeployController:
             current["last_stdout"] = stdout_text
             current["last_stderr"] = stderr_text
             if alive:
+                if current.get("_stop_requested"):
+                    current["state"] = "stopping"
+                    current["error"] = "Stopping..."
                 self._persist_job(current)
                 return
 
@@ -763,7 +958,10 @@ class DeployController:
             if current is None:
                 return
             current["finished_at"] = finished_at or current.get("finished_at") or _now_iso()
-            if exit_code == 0:
+            if current.get("_stop_requested"):
+                current["state"] = "stopped"
+                current["error"] = current.get("error") or "Stopped"
+            elif exit_code == 0:
                 current["state"] = "success"
                 current["error"] = None
             else:
@@ -841,6 +1039,11 @@ def run_deploy_command(payload: DeployRunRequest) -> DeployRunResponse:
     return controller.submit_command(payload)
 
 
+def save_deploy_input_values(values: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    controller = _get_controller()
+    return controller.save_input_values(values)
+
+
 def list_deploy_jobs() -> DeployJobsResponse:
     controller = _get_controller()
     controller.refresh_jobs()
@@ -853,3 +1056,8 @@ def list_deploy_jobs() -> DeployJobsResponse:
 def get_deploy_job_logs(job_id: str, stream: str, lines: int) -> DeployJobLogsResponse:
     controller = _get_controller()
     return controller.get_logs(job_id, stream, lines)
+
+
+def stop_deploy_job(job_id: str) -> DeployJob:
+    controller = _get_controller()
+    return controller.stop_job(job_id)

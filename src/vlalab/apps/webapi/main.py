@@ -14,10 +14,13 @@ import vlalab
 
 from .models import (
     DeployJobLogsResponse,
+    DeployInputValuesRequest,
+    DeployInputValuesResponse,
     DeployJobsResponse,
     DeployOverviewResponse,
     DeployRunRequest,
     DeployRunResponse,
+    DeployStopResponse,
     LatencyCompareResponse,
     OverviewResponse,
     ProjectListResponse,
@@ -26,7 +29,14 @@ from .models import (
     RunStepsResponse,
 )
 from .dataset_service import inspect_dataset, load_dataset_episode_view
-from .deploy_service import build_deploy_overview, get_deploy_job_logs, list_deploy_jobs, run_deploy_command
+from .deploy_service import (
+    build_deploy_overview,
+    get_deploy_job_logs,
+    list_deploy_jobs,
+    run_deploy_command,
+    save_deploy_input_values,
+    stop_deploy_job,
+)
 from .eval_service import load_eval_inline, load_eval_view
 from .replay_service import delete_run, generate_attention, load_attention_state, load_run_replay
 from .service import (
@@ -354,6 +364,17 @@ def deploy_run(payload: DeployRunRequest = Body(...)) -> DeployRunResponse:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.post("/api/deploy/inputs", response_model=DeployInputValuesResponse)
+def deploy_save_inputs(payload: DeployInputValuesRequest = Body(...)) -> DeployInputValuesResponse:
+    try:
+        values = save_deploy_input_values(payload.values)
+        return DeployInputValuesResponse(ok=True, message="输入参数已保存", values=values)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.get("/api/deploy/jobs", response_model=DeployJobsResponse)
 def deploy_jobs() -> DeployJobsResponse:
     try:
@@ -372,6 +393,17 @@ def deploy_job_logs(
 ) -> DeployJobLogsResponse:
     try:
         return get_deploy_job_logs(job_id, stream=stream, lines=lines)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/deploy/jobs/{job_id}/stop", response_model=DeployStopResponse)
+def deploy_stop_job(job_id: str) -> DeployStopResponse:
+    try:
+        job = stop_deploy_job(job_id)
+        return DeployStopResponse(ok=True, message="停止请求已发送", job=job)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

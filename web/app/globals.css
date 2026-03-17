@@ -1777,6 +1777,10 @@ code.inline-code {
 
 .deploy-workflow-grid {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  max-height: 76vh;
+  overflow-y: auto;
+  align-content: start;
+  padding-right: 6px;
 }
 
 .deploy-target-card {
@@ -1794,11 +1798,14 @@ code.inline-code {
   display: grid;
   gap: 16px;
   padding: 22px;
+  min-height: 620px;
+  max-height: 620px;
   border-radius: 22px;
   border: 1px solid rgba(31, 41, 51, 0.08);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(240, 253, 250, 0.76)),
     radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 32%);
+  overflow: hidden;
 }
 
 .deploy-target-header,
@@ -2065,8 +2072,37 @@ code.inline-code {
   background: rgba(31, 41, 51, 0.92);
 }
 
+.deploy-command-block.is-scrollable {
+  height: 168px;
+  max-height: 168px;
+  overflow: auto;
+}
+
 .deploy-command-block.is-error {
   background: #450a0a;
+}
+
+.deploy-log-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.deploy-log-panel {
+  display: grid;
+  gap: 8px;
+  min-height: 214px;
+}
+
+.deploy-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.deploy-log-empty {
+  min-height: 168px;
+  display: flex;
+  align-items: center;
 }
 
 .deploy-note-card.is-standalone strong {

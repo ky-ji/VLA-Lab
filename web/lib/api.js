@@ -148,12 +148,22 @@ export async function runDeployCommand(commandId, values = {}) {
   });
 }
 
+export async function saveDeployInputs(values = {}) {
+  return browserPostJson("/api/deploy/inputs", {
+    values,
+  });
+}
+
 export async function getDeployJobs() {
   return safeFetch("/api/deploy/jobs");
 }
 
 export async function getDeployJobLogs(jobId, params = {}) {
   return safeFetch(`/api/deploy/jobs/${encodeURIComponent(jobId)}/logs`, params);
+}
+
+export async function stopDeployJob(jobId) {
+  return browserPostJson(`/api/deploy/jobs/${encodeURIComponent(jobId)}/stop`, {});
 }
 
 export async function getRunAttention(project, runName, params = {}) {

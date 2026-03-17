@@ -214,6 +214,20 @@ def test_background_command_records_remote_pid(tmp_path, monkeypatch):
         controller.close()
 
 
+class _FakePopen:
+    def __init__(self, stdout="preset done\n", stderr="", returncode=0):
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+        self.pid = 2468
+
+    def communicate(self, timeout=None):
+        return self._stdout, self._stderr
+
+    def poll(self):
+        return self.returncode
+
+
 def test_foreground_command_records_stdout_and_success(tmp_path, monkeypatch):
     controller = ds.DeployController(ds.load_deploy_config(str(_write_config(tmp_path))))
     monkeypatch.setattr(controller, "_executor", ImmediateExecutor())
@@ -229,8 +243,8 @@ def test_foreground_command_records_stdout_and_success(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         controller,
-        "_run_ssh_script",
-        lambda target, script, timeout=60.0: subprocess.CompletedProcess([], 0, "preset done\n", ""),
+        "_spawn_ssh_script",
+        lambda target, script: _FakePopen(stdout="preset done\n", stderr="", returncode=0),
     )
 
     try:
@@ -248,5 +262,65 @@ def test_foreground_command_records_stdout_and_success(tmp_path, monkeypatch):
         assert job.remote_pid is None
         assert job.last_stdout == "preset done\n"
         assert job.error is None
+    finally:
+        controller.close()
+
+
+def test_saved_input_values_are_exposed_in_input_specs(tmp_path):
+    controller = ds.DeployController(ds.load_deploy_config(str(_write_config(tmp_path))))
+    try:
+        controller.save_input_values(
+            {
+                "model_server_config_path": "/remote/server.saved.yaml",
+                "inference_client_config_path": "/remote/client.saved.yaml",
+            }
+        )
+        specs = controller.input_specs()
+        spec_map = {item.id: item for item in specs}
+        assert spec_map["model_server_config_path"].current_value == "/remote/server.saved.yaml"
+        assert spec_map["inference_client_config_path"].current_value == "/remote/client.saved.yaml"
+    finally:
+        controller.close()
+
+
+def test_stop_background_job_sends_remote_kill(tmp_path, monkeypatch):
+    controller = ds.DeployController(ds.load_deploy_config(str(_write_config(tmp_path))))
+    calls = []
+
+    def fake_run_ssh_host(ssh_host, script, timeout=20.0):
+        calls.append((ssh_host, script))
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(controller, "_run_ssh_host", fake_run_ssh_host)
+
+    job = {
+        "id": "job-stop-bg",
+        "command_id": "start_model_server",
+        "target_id": "server",
+        "state": "running",
+        "remote_pid": 4321,
+        "stdout_log": "/tmp/vlalab/start_model_server.stdout.log",
+        "stderr_log": "/tmp/vlalab/start_model_server.stderr.log",
+        "last_stdout": "",
+        "last_stderr": "",
+        "submitted_at": "2026-03-17T00:00:00",
+        "started_at": "2026-03-17T00:00:01",
+        "finished_at": None,
+        "error": None,
+        "_background": True,
+        "_ssh_host": "groot-gpu",
+        "_status_path": "/tmp/vlalab/job-stop-bg.status",
+        "_values": {"model_server_config_path": "/remote/server.yaml"},
+        "_stop_requested": False,
+    }
+
+    try:
+        controller._jobs[job["id"]] = job
+        stopped = controller.stop_job(job["id"])
+        assert stopped.state == "stopping"
+        assert calls
+        assert calls[0][0] == "groot-gpu"
+        assert "kill -TERM" in calls[0][1]
+        assert "4321" in calls[0][1]
     finally:
         controller.close()
