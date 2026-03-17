@@ -1815,6 +1815,12 @@ code.inline-code {
   align-content: start;
 }
 
+.deploy-workflow-card h3 {
+  margin: 0;
+  font-family: "Space Grotesk", "Avenir Next", sans-serif;
+  letter-spacing: -0.03em;
+}
+
 .deploy-target-header,
 .deploy-action-row,
 .deploy-meta-row {
@@ -1871,6 +1877,7 @@ code.inline-code {
 .deploy-meta-list {
   display: grid;
   gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   max-height: 168px;
   min-height: 0;
   overflow-y: auto;
@@ -2098,7 +2105,7 @@ code.inline-code {
   display: grid;
   gap: 12px;
   min-height: 0;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1.65fr) minmax(0, 1fr);
 }
 
 .deploy-log-panel {
@@ -2133,6 +2140,10 @@ code.inline-code {
 
   .deploy-field-span {
     grid-column: auto;
+  }
+
+  .deploy-meta-list {
+    grid-template-columns: 1fr;
   }
 }
 

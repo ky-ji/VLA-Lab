@@ -244,39 +244,44 @@ function CommandCard({ command, target, missingInputs, busy, activeJob, stopping
   );
 }
 
-function JobCard({ job, targetLabel, stopping, onStop }) {
+function JobCard({ command, targetLabel, job, stopping, onStop }) {
+  const state = job?.state || "idle";
+  const stdoutPath = job?.stdout_log || (command.background ? "等待命令首次运行后生成" : "--");
+  const stderrPath = job?.stderr_log || (command.background ? "等待命令首次运行后生成" : "--");
+  const hasLogs = Boolean(job?.last_stdout || job?.last_stderr);
+
   return (
     <article className="deploy-workflow-card">
       <div className="deploy-workflow-top">
         <div className="deploy-target-header">
           <div>
             <p className="eyebrow">{targetLabel}</p>
-            <h3>{prettyKey(job.command_id)}</h3>
+            <h3>{command.label}</h3>
           </div>
-          <span className={`deploy-status-chip ${stateToneClass(job.state)}`}>{prettyState(job.state)}</span>
+          <span className={`deploy-status-chip ${stateToneClass(state)}`}>{prettyState(state)}</span>
         </div>
         <div className="deploy-meta-list">
           <div className="deploy-meta-row">
             <span className="stat-label">Job ID</span>
-            <code>{job.id}</code>
+            <code>{job?.id || "--"}</code>
           </div>
           <div className="deploy-meta-row">
             <span className="stat-label">Remote PID</span>
-            <span>{job.remote_pid || "--"}</span>
+            <span>{job?.remote_pid || "--"}</span>
           </div>
           <div className="deploy-meta-row">
             <span className="stat-label">Submitted</span>
-            <span>{formatTime(job.submitted_at)}</span>
+            <span>{formatTime(job?.submitted_at)}</span>
           </div>
           <div className="deploy-meta-row">
             <span className="stat-label">Started</span>
-            <span>{formatTime(job.started_at)}</span>
+            <span>{formatTime(job?.started_at)}</span>
           </div>
           <div className="deploy-meta-row">
             <span className="stat-label">Finished</span>
-            <span>{formatTime(job.finished_at)}</span>
+            <span>{formatTime(job?.finished_at)}</span>
           </div>
-          {job.error ? (
+          {job?.error ? (
             <div className="deploy-meta-row is-error">
               <span className="stat-label">Error</span>
               <span>{job.error}</span>
@@ -284,21 +289,19 @@ function JobCard({ job, targetLabel, stopping, onStop }) {
           ) : null}
         </div>
 
-        {(job.stdout_log || job.stderr_log) ? (
-          <div className="deploy-command-meta">
-            <div>
-              <span className="stat-label">stdout</span>
-              <code>{job.stdout_log || "--"}</code>
-            </div>
-            <div>
-              <span className="stat-label">stderr</span>
-              <code>{job.stderr_log || "--"}</code>
-            </div>
+        <div className="deploy-command-meta">
+          <div>
+            <span className="stat-label">stdout</span>
+            <code>{stdoutPath}</code>
           </div>
-        ) : null}
+          <div>
+            <span className="stat-label">stderr</span>
+            <code>{stderrPath}</code>
+          </div>
+        </div>
 
         <div className="deploy-action-row">
-          {job.stoppable ? (
+          {job?.stoppable ? (
             <button
               type="button"
               className="deploy-action-button is-danger"
@@ -308,30 +311,34 @@ function JobCard({ job, targetLabel, stopping, onStop }) {
               {stopping ? "停止中..." : "停止命令"}
             </button>
           ) : (
-            <span className="muted">当前任务不可停止</span>
+            <span className="muted">{job ? "当前任务不可停止" : "该命令最近还没有执行记录"}</span>
           )}
         </div>
       </div>
 
       <div className="deploy-log-stack">
-        <div className="deploy-log-panel">
+        <div className="deploy-log-panel is-stdout">
           <div className="deploy-log-header">
-            <span className="stat-label">stdout</span>
+            <span className="stat-label">stdout · 最近一次执行</span>
           </div>
-          {job.last_stdout ? (
+          {job?.last_stdout ? (
             <pre className="deploy-command-block is-output is-scrollable">{job.last_stdout}</pre>
           ) : (
-            <div className="empty-panel deploy-empty-panel deploy-log-empty">stdout 暂无输出</div>
+            <div className="empty-panel deploy-empty-panel deploy-log-empty">
+              {hasLogs ? "stdout 暂无输出" : "还没有这条命令的 stdout 记录"}
+            </div>
           )}
         </div>
-        <div className="deploy-log-panel">
+        <div className="deploy-log-panel is-stderr">
           <div className="deploy-log-header">
-            <span className="stat-label">stderr</span>
+            <span className="stat-label">stderr · 最近一次执行</span>
           </div>
-          {job.last_stderr ? (
+          {job?.last_stderr ? (
             <pre className="deploy-command-block is-output is-error is-scrollable">{job.last_stderr}</pre>
           ) : (
-            <div className="empty-panel deploy-empty-panel deploy-log-empty">stderr 暂无输出</div>
+            <div className="empty-panel deploy-empty-panel deploy-log-empty">
+              {hasLogs ? "stderr 暂无输出" : "还没有这条命令的 stderr 记录"}
+            </div>
           )}
         </div>
       </div>
@@ -584,6 +591,12 @@ export default function DeployDashboardClient({ initialOverview }) {
   const commands = overview.commands || [];
   const inputs = overview.inputs || [];
   const targetMap = Object.fromEntries(targets.map((target) => [target.id, target]));
+  const latestJobByCommand = Object.fromEntries(
+    commands.map((command) => [
+      command.id,
+      jobs.find((job) => job.command_id === command.id) || null,
+    ])
+  );
   const connectedCount = targets.filter((target) => target.connected).length;
   const runningJobs = jobs.filter((job) => ["queued", "running", "stopping"].includes(job.state)).length;
   const successfulJobs = jobs.filter((job) => job.state === "success").length;
@@ -716,22 +729,23 @@ export default function DeployDashboardClient({ initialOverview }) {
         <div className="section-heading">
           <div>
             <p className="eyebrow">Jobs</p>
-            <h2>最近执行记录与日志</h2>
+            <h2>最近执行记录与日志（和部署命令一一对应）</h2>
           </div>
         </div>
         <div className="deploy-workflow-grid">
-          {jobs.length ? (
-            jobs.map((job) => (
+          {commands.length ? (
+            commands.map((command) => (
               <JobCard
-                key={job.id}
-                job={job}
-                targetLabel={targetMap[job.target_id]?.label || job.target_id}
-                stopping={stoppingJobId === job.id}
+                key={command.id}
+                command={command}
+                job={latestJobByCommand[command.id]}
+                targetLabel={targetMap[command.target_id]?.label || command.target_id}
+                stopping={stoppingJobId === latestJobByCommand[command.id]?.id}
                 onStop={handleStop}
               />
             ))
           ) : (
-            <div className="empty-panel deploy-empty-panel">还没有任何 deploy job。</div>
+            <div className="empty-panel deploy-empty-panel">当前没有可展示的部署命令。</div>
           )}
         </div>
       </section>
