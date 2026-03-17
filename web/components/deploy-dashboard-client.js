@@ -17,7 +17,7 @@ const EMPTY_OVERVIEW = {
 };
 
 function prettyState(state) {
-  if (!state) return "Unknown";
+  if (!state) return "未知";
   return String(state)
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
@@ -107,21 +107,21 @@ function ConnectionCard({ target }) {
           <h3>{target.label}</h3>
         </div>
         <span className={`deploy-status-chip ${stateToneClass(target.connected ? "connected" : "disconnected")}`}>
-          {target.connected ? "Connected" : "Disconnected"}
+          {target.connected ? "已连接" : "未连接"}
         </span>
       </div>
       <div className="deploy-meta-list">
         <div className="deploy-meta-row">
-          <span className="stat-label">Target</span>
+          <span className="stat-label">目标</span>
           <span>{target.id}</span>
         </div>
         <div className="deploy-meta-row">
-          <span className="stat-label">Status</span>
-          <span>{target.connected ? "SSH reachable" : "SSH unavailable"}</span>
+          <span className="stat-label">状态</span>
+          <span>{target.connected ? "SSH 可达" : "SSH 不可达"}</span>
         </div>
         {target.last_error ? (
           <div className="deploy-meta-row is-error">
-            <span className="stat-label">Error</span>
+            <span className="stat-label">错误</span>
             <span>{target.last_error}</span>
           </div>
         ) : null}
@@ -236,18 +236,18 @@ function CommandJobCard({
       <div className="cj-info-strip">
         <span className="cj-info-item"><span className="cj-info-label">PID</span>{job?.remote_pid || "--"}</span>
         <span className="cj-info-sep" />
-        <span className="cj-info-item"><span className="cj-info-label">Mode</span>{command.background ? "后台" : "前台"}</span>
+        <span className="cj-info-item"><span className="cj-info-label">方式</span>{command.background ? "后台" : "前台"}</span>
         <span className="cj-info-sep" />
-        <span className="cj-info-item"><span className="cj-info-label">Started</span>{formatTime(job?.started_at)}</span>
+        <span className="cj-info-item"><span className="cj-info-label">开始</span>{formatTime(job?.started_at)}</span>
         <span className="cj-info-sep" />
-        <span className="cj-info-item"><span className="cj-info-label">Finished</span>{formatTime(job?.finished_at)}</span>
+        <span className="cj-info-item"><span className="cj-info-label">结束</span>{formatTime(job?.finished_at)}</span>
         <button type="button" className="cj-expand-btn" onClick={() => setExpanded((v) => !v)}>
           {(expanded || autoExpand) ? "收起详情" : "展开详情"}
         </button>
       </div>
 
       {missingInputs.length ? (
-        <div className="deploy-manual-hint">缺少参数: {missingInputs.map((item) => prettyKey(item)).join(", ")}</div>
+        <div className="deploy-manual-hint">缺少参数：{missingInputs.map((item) => prettyKey(item)).join(", ")}</div>
       ) : null}
       {job?.error ? <div className="cj-error-bar">{job.error}</div> : null}
 
@@ -512,7 +512,7 @@ export default function DeployDashboardClient({ initialOverview }) {
 
       setForm(nextValues);
       setInputHistory(nextHistory);
-      await persistInputs(nextValues, "JSON 配置已导入");
+      await persistInputs(nextValues, "JSON 已导入");
       await refreshNow();
     } catch (error) {
       setErrorText(error.message || "JSON 导入失败");
@@ -537,36 +537,36 @@ export default function DeployDashboardClient({ initialOverview }) {
     <div className="section-stack">
       <section className="hero-panel deploy-hero">
         <div className="hero-copy">
-          <p className="eyebrow">Deploy Console</p>
-          <h1>RealWorld Deploy Dashboard</h1>
+          <p className="eyebrow">控制台</p>
+          <h1>部署控制台</h1>
           <p className="hero-desc">
-            这个版本只负责 2 台机器的 SSH 连接、4 条固定命令的后台执行，以及日志与 PID 状态展示。
+            统一查看目标机器连接、命令执行、日志与 PID 状态。
           </p>
           <div className="hero-actions">
             <button type="button" className="button-link deploy-inline-button is-secondary" onClick={refreshNow} disabled={isRefreshing}>
-              {isRefreshing ? "刷新中..." : "立即刷新"}
+              {isRefreshing ? "刷新中..." : "刷新"}
             </button>
             <span className="deploy-refresh-note">
-              最近刷新 {overview?.refreshed_at ? new Date(overview.refreshed_at).toLocaleTimeString() : "--"}
+              上次刷新 {overview?.refreshed_at ? new Date(overview.refreshed_at).toLocaleTimeString() : "--"}
             </span>
           </div>
         </div>
         <aside className="hero-aside">
           <div className="metric-grid">
             <div className="metric-card">
-              <span className="stat-label">Connected Targets</span>
+              <span className="stat-label">已连接目标</span>
               <strong>{connectedCount}</strong>
             </div>
             <div className="metric-card">
-              <span className="stat-label">Commands</span>
+              <span className="stat-label">命令数</span>
               <strong>{commands.length}</strong>
             </div>
             <div className="metric-card">
-              <span className="stat-label">Running Jobs</span>
+              <span className="stat-label">运行中</span>
               <strong>{runningJobs}</strong>
             </div>
             <div className="metric-card">
-              <span className="stat-label">Successful Jobs</span>
+              <span className="stat-label">成功数</span>
               <strong>{successfulJobs}</strong>
             </div>
           </div>
@@ -578,8 +578,8 @@ export default function DeployDashboardClient({ initialOverview }) {
       <section className="section-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Connections</p>
-            <h2>两台目标机器自动连接检查</h2>
+            <p className="eyebrow">目标</p>
+            <h2>目标连接状态</h2>
           </div>
         </div>
         <div className="deploy-target-grid">
@@ -592,17 +592,17 @@ export default function DeployDashboardClient({ initialOverview }) {
       <section className="section-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Inputs</p>
-            <h2>固定输入参数</h2>
+            <p className="eyebrow">参数</p>
+            <h2>公共参数</h2>
           </div>
           <div className="deploy-action-row">
             <button
               type="button"
               className="deploy-action-button is-ghost"
-              onClick={() => persistInputs(form, "输入参数已保存")}
+              onClick={() => persistInputs(form, "参数已保存")}
               disabled={isSavingInputs}
             >
-              {isSavingInputs ? "保存中..." : "保存记忆"}
+              {isSavingInputs ? "保存中..." : "保存参数"}
             </button>
             <button type="button" className="deploy-action-button is-ghost" onClick={handleExportJson}>
               导出 JSON
@@ -630,8 +630,8 @@ export default function DeployDashboardClient({ initialOverview }) {
       <section className="section-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Commands & Jobs</p>
-            <h2>部署命令与执行记录（一一对应）</h2>
+            <p className="eyebrow">命令</p>
+            <h2>命令与记录</h2>
           </div>
         </div>
         <div className="deploy-command-job-grid">
@@ -657,7 +657,7 @@ export default function DeployDashboardClient({ initialOverview }) {
               );
             })
           ) : (
-            <div className="empty-panel deploy-empty-panel">当前没有可展示的部署命令。</div>
+            <div className="empty-panel deploy-empty-panel">暂无部署命令。</div>
           )}
         </div>
       </section>
