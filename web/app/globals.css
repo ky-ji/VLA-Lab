@@ -2022,6 +2022,63 @@ code.inline-code {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+/* 合并后的命令+任务卡片布局 */
+.deploy-command-job-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+}
+
+.deploy-command-job-card {
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  min-height: 480px;
+  max-height: 620px;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-radius: 22px;
+  border: 1px solid rgba(31, 41, 51, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(240, 253, 250, 0.76)),
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 32%);
+  overflow: hidden;
+}
+
+.deploy-command-job-head {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.deploy-command-job-body {
+  display: grid;
+  grid-template-columns: 1fr minmax(200px, 0.6fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.deploy-command-job-left {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.deploy-command-job-right {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.deploy-command-job-right .deploy-job-meta {
+  display: grid;
+  gap: 6px;
+}
+
+.deploy-summary {
+  font-size: 0.86rem;
+  margin: 0;
+}
+
 .deploy-command-meta,
 .deploy-process-meta {
   display: grid;
@@ -2158,8 +2215,19 @@ code.inline-code {
   .deploy-detail-grid,
   .deploy-runbook-grid,
   .deploy-workflow-grid,
+  .deploy-command-job-grid,
   .deploy-path-list,
   .deploy-process-list {
+    grid-template-columns: 1fr;
+  }
+
+  .deploy-command-job-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .deploy-command-job-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -170,7 +170,20 @@ function InputField({ spec, value, history, onChange, onCommit }) {
   );
 }
 
-function CommandCard({ command, target, missingInputs, busy, activeJob, stopping, onRun, onStop }) {
+/**
+ * 合并后的命令+任务卡片：每个命令与其对应 job 一一对应，提高视觉效率
+ */
+function CommandJobCard({
+  command,
+  target,
+  job,
+  missingInputs,
+  busy,
+  activeJob,
+  stopping,
+  onRun,
+  onStop,
+}) {
   const isDisconnected = !target?.connected;
   const isRunning = busy;
   let state = "ready";
@@ -190,129 +203,109 @@ function CommandCard({ command, target, missingInputs, busy, activeJob, stopping
   } else if (missingInputs.length) {
     state = "queued";
     summary = `Missing inputs: ${missingInputs.map((item) => prettyKey(item)).join(", ")}`;
+  } else if (job?.state) {
+    state = job.state;
+    summary = job.error || `Job ${job.id || ""} · PID ${job.remote_pid || "--"}`;
   }
 
-  return (
-    <article className="deploy-runbook-card">
-      <div className="deploy-runbook-head">
-        <div>
-          <p className="eyebrow">{target?.label || command.target_id}</p>
-          <h3>{command.label}</h3>
-        </div>
-        <span className={`deploy-status-chip ${stateToneClass(state)}`}>{prettyState(state)}</span>
-      </div>
-      <pre className="deploy-command-block">{command.resolved_preview || "No preview available"}</pre>
-      <div className="deploy-command-meta">
-        <div>
-          <span className="stat-label">Mode</span>
-          <code>{command.background ? "background" : "foreground"}</code>
-        </div>
-        <div>
-          <span className="stat-label">Inputs</span>
-          <code>{command.required_inputs?.length ? command.required_inputs.join(", ") : "--"}</code>
-        </div>
-        <div>
-          <span className="stat-label">Target</span>
-          <code>{command.target_id}</code>
-        </div>
-      </div>
-      <p className="muted">{summary}</p>
-      {missingInputs.length ? (
-        <div className="deploy-manual-hint">缺少参数: {missingInputs.map((item) => prettyKey(item)).join(", ")}</div>
-      ) : null}
-      <div className="deploy-action-row">
-        <button
-          type="button"
-          className="deploy-action-button is-primary"
-          onClick={() => onRun(command.id)}
-          disabled={isDisconnected || missingInputs.length > 0 || isRunning}
-        >
-          运行命令
-        </button>
-        {activeJob?.stoppable ? (
-          <button
-            type="button"
-            className="deploy-action-button is-danger"
-            onClick={() => onStop(activeJob.id)}
-            disabled={stopping}
-          >
-            {stopping ? "停止中..." : "停止命令"}
-          </button>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function JobCard({ command, targetLabel, job, stopping, onStop }) {
-  const state = job?.state || "idle";
   const stdoutPath = job?.stdout_log || (command.background ? "等待命令首次运行后生成" : "--");
   const stderrPath = job?.stderr_log || (command.background ? "等待命令首次运行后生成" : "--");
   const hasLogs = Boolean(job?.last_stdout || job?.last_stderr);
 
   return (
-    <article className="deploy-workflow-card">
-      <div className="deploy-workflow-top">
+    <article className="deploy-command-job-card">
+      <div className="deploy-command-job-head">
         <div className="deploy-target-header">
           <div>
-            <p className="eyebrow">{targetLabel}</p>
+            <p className="eyebrow">{target?.label || command.target_id}</p>
             <h3>{command.label}</h3>
           </div>
           <span className={`deploy-status-chip ${stateToneClass(state)}`}>{prettyState(state)}</span>
         </div>
-        <div className="deploy-meta-list">
-          <div className="deploy-meta-row">
-            <span className="stat-label">Job ID</span>
-            <code>{job?.id || "--"}</code>
-          </div>
-          <div className="deploy-meta-row">
-            <span className="stat-label">Remote PID</span>
-            <span>{job?.remote_pid || "--"}</span>
-          </div>
-          <div className="deploy-meta-row">
-            <span className="stat-label">Submitted</span>
-            <span>{formatTime(job?.submitted_at)}</span>
-          </div>
-          <div className="deploy-meta-row">
-            <span className="stat-label">Started</span>
-            <span>{formatTime(job?.started_at)}</span>
-          </div>
-          <div className="deploy-meta-row">
-            <span className="stat-label">Finished</span>
-            <span>{formatTime(job?.finished_at)}</span>
-          </div>
-          {job?.error ? (
-            <div className="deploy-meta-row is-error">
-              <span className="stat-label">Error</span>
-              <span>{job.error}</span>
+
+        <div className="deploy-command-job-body">
+          <div className="deploy-command-job-left">
+            <pre className="deploy-command-block is-compact">{command.resolved_preview || "No preview available"}</pre>
+            <div className="deploy-command-meta">
+              <div>
+                <span className="stat-label">Mode</span>
+                <code>{command.background ? "background" : "foreground"}</code>
+              </div>
+              <div>
+                <span className="stat-label">Inputs</span>
+                <code>{command.required_inputs?.length ? command.required_inputs.join(", ") : "--"}</code>
+              </div>
+              <div>
+                <span className="stat-label">Target</span>
+                <code>{command.target_id}</code>
+              </div>
             </div>
-          ) : null}
-        </div>
-
-        <div className="deploy-command-meta">
-          <div>
-            <span className="stat-label">stdout</span>
-            <code>{stdoutPath}</code>
+            {missingInputs.length ? (
+              <div className="deploy-manual-hint">缺少参数: {missingInputs.map((item) => prettyKey(item)).join(", ")}</div>
+            ) : null}
+            <p className="muted deploy-summary">{summary}</p>
+            <div className="deploy-action-row">
+              <button
+                type="button"
+                className="deploy-action-button is-primary"
+                onClick={() => onRun(command.id)}
+                disabled={isDisconnected || missingInputs.length > 0 || isRunning}
+              >
+                运行命令
+              </button>
+              {activeJob?.stoppable ? (
+                <button
+                  type="button"
+                  className="deploy-action-button is-danger"
+                  onClick={() => onStop(activeJob.id)}
+                  disabled={stopping}
+                >
+                  {stopping ? "停止中..." : "停止命令"}
+                </button>
+              ) : null}
+            </div>
           </div>
-          <div>
-            <span className="stat-label">stderr</span>
-            <code>{stderrPath}</code>
-          </div>
-        </div>
 
-        <div className="deploy-action-row">
-          {job?.stoppable ? (
-            <button
-              type="button"
-              className="deploy-action-button is-danger"
-              onClick={() => onStop(job.id)}
-              disabled={stopping}
-            >
-              {stopping ? "停止中..." : "停止命令"}
-            </button>
-          ) : (
-            <span className="muted">{job ? "当前任务不可停止" : "该命令最近还没有执行记录"}</span>
-          )}
+          <div className="deploy-command-job-right">
+            <div className="deploy-job-meta">
+              <div className="deploy-meta-row">
+                <span className="stat-label">Job ID</span>
+                <code>{job?.id || "--"}</code>
+              </div>
+              <div className="deploy-meta-row">
+                <span className="stat-label">Remote PID</span>
+                <span>{job?.remote_pid || "--"}</span>
+              </div>
+              <div className="deploy-meta-row">
+                <span className="stat-label">Submitted</span>
+                <span>{formatTime(job?.submitted_at)}</span>
+              </div>
+              <div className="deploy-meta-row">
+                <span className="stat-label">Started</span>
+                <span>{formatTime(job?.started_at)}</span>
+              </div>
+              <div className="deploy-meta-row">
+                <span className="stat-label">Finished</span>
+                <span>{formatTime(job?.finished_at)}</span>
+              </div>
+              {job?.error ? (
+                <div className="deploy-meta-row is-error">
+                  <span className="stat-label">Error</span>
+                  <span>{job.error}</span>
+                </div>
+              ) : null}
+            </div>
+            <div className="deploy-command-meta">
+              <div>
+                <span className="stat-label">stdout</span>
+                <code>{stdoutPath}</code>
+              </div>
+              <div>
+                <span className="stat-label">stderr</span>
+                <code>{stderrPath}</code>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -698,52 +691,32 @@ export default function DeployDashboardClient({ initialOverview }) {
       <section className="section-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Commands</p>
-            <h2>固定四个部署命令</h2>
+            <p className="eyebrow">Commands & Jobs</p>
+            <h2>部署命令与执行记录（一一对应）</h2>
           </div>
         </div>
-        <div className="deploy-runbook-grid">
-          {commands.map((command) => {
-            const missingInputs = (command.required_inputs || []).filter((key) => !String(form[key] || "").trim());
-            const activeJob = jobs.find(
-              (job) => job.command_id === command.id && ["queued", "running", "stopping"].includes(job.state)
-            );
-            return (
-              <CommandCard
-                key={command.id}
-                command={command}
-                target={targetMap[command.target_id]}
-                missingInputs={missingInputs}
-                busy={Boolean(activeJob) || (isPending && activeCommandId === command.id)}
-                activeJob={activeJob}
-                stopping={stoppingJobId === activeJob?.id}
-                onRun={handleRun}
-                onStop={handleStop}
-              />
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="section-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Jobs</p>
-            <h2>最近执行记录与日志（和部署命令一一对应）</h2>
-          </div>
-        </div>
-        <div className="deploy-workflow-grid">
+        <div className="deploy-command-job-grid">
           {commands.length ? (
-            commands.map((command) => (
-              <JobCard
-                key={command.id}
-                command={command}
-                job={latestJobByCommand[command.id]}
-                targetLabel={targetMap[command.target_id]?.label || command.target_id}
-                stopping={stoppingJobId === latestJobByCommand[command.id]?.id}
-                onStop={handleStop}
-              />
-            ))
+            commands.map((command) => {
+              const missingInputs = (command.required_inputs || []).filter((key) => !String(form[key] || "").trim());
+              const activeJob = jobs.find(
+                (job) => job.command_id === command.id && ["queued", "running", "stopping"].includes(job.state)
+              );
+              return (
+                <CommandJobCard
+                  key={command.id}
+                  command={command}
+                  target={targetMap[command.target_id]}
+                  job={latestJobByCommand[command.id]}
+                  missingInputs={missingInputs}
+                  busy={Boolean(activeJob) || (isPending && activeCommandId === command.id)}
+                  activeJob={activeJob}
+                  stopping={stoppingJobId === activeJob?.id}
+                  onRun={handleRun}
+                  onStop={handleStop}
+                />
+              );
+            })
           ) : (
             <div className="empty-panel deploy-empty-panel">当前没有可展示的部署命令。</div>
           )}
