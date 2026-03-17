@@ -1,0 +1,22 @@
+{
+  "_background": true,
+  "_ssh_host": "yxlab",
+  "_status_path": "/tmp/vlalab/start_robot_server.stdout.log.36c47457a46e.status",
+  "_stop_requested": false,
+  "_values": {
+    "model_server_config_path": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/configs/server_config_groot.py"
+  },
+  "command_id": "start_robot_server",
+  "error": "Background process exited without a status file",
+  "finished_at": "2026-03-17T16:24:56",
+  "id": "36c47457a46e",
+  "last_stderr": "/home/yxlab/.conda/envs/robot/lib/python3.8/site-packages/hydra/plugins/config_source.py:190: UserWarning: \nMissing @package directive robot_client/franka_hardware.yaml in pkg://polymetis.conf.\nSee https://hydra.cc/docs/next/upgrades/0.11_to_1.0/adding_a_package_directive\n  warnings.warn(message=msg, category=UserWarning)\n/home/yxlab/.conda/envs/robot/lib/python3.8/site-packages/hydra/plugins/config_source.py:190: UserWarning: \nMissing @package directive gripper/franka_hand.yaml in pkg://polymetis.conf.\nSee https://hydra.cc/docs/next/upgrades/0.11_to_1.0/adding_a_package_directive\n  warnings.warn(message=msg, category=UserWarning)\n",
+  "last_stdout": "  - 40.0\n  - 40.0\n  - 40.0\n  - 40.0\n  lower_force:\n  - 40.0\n  - 40.0\n  - 40.0\n  - 40.0\n  - 40.0\n  - 40.0\n  upper_force:\n  - 40.0\n  - 40.0\n  - 40.0\n  - 40.0\n  - 40.0\n  - 40.0\nsafety_controller:\n  is_active: true\n  margins:\n    cartesian_pos: 0.05\n    joint_pos: 0.2\n    joint_vel: 0.5\n  stiffness:\n    cartesian_pos: 200.0\n    joint_pos: 50.0\n    joint_vel: 20.0\n\n[2026-03-17 16:22:17,795][polymetis.robot_client.executable_robot_client][INFO] - === Executing client at /home/yxlab/.conda/envs/robot/bin/franka_panda_client ===\n[2026-03-17 16:22:17.824] [info] ==== Initializing new RobotClient... ====\n[2026-03-17 16:22:17.895] [info] Success.\nUsing 20MB as stack size\nUsing 80 as real-time thread priority\nUsing 0 as cpu_dma_latency\nDisabled sbrk...\nDisabled mmap...\nLocked memory...\nInitialized pthread...\nFinished setting stacksize...\nFinished setting scheduling policy & priority...\nCreating thread...\nStarted realtime thread.\n[2026-03-17 16:22:17.896] [info] Connecting to Franka Emika...\n[2026-03-17 16:22:17.904] [info] Connected.\n[2026-03-17 16:22:20,510][__main__][INFO] - Adding /home/yxlab/.conda/envs/robot/lib/python3.8/build to $PATH\n[2026-03-17 16:22:20,521][polymetis.robot_client.executable_robot_client][INFO] - === Config: ===\nexec: franka_hand_client\nrobot_ip: 172.16.0.2\ncontrol_ip: 0.0.0.0\ncontrol_port: 50052\nrobot_client_metadata_path: /tmp/tmpm4g29phy\n\n[2026-03-17 16:22:20,521][polymetis.robot_client.executable_robot_client][INFO] - === Executing client at /home/yxlab/.conda/envs/robot/bin/franka_hand_client ===\n[2026-03-17 16:22:20.533] [info] Connecting to robot_ip 172.16.0.2\n[2026-03-17 16:22:28.234] [info] Connected.\n[2026-03-17 16:22:50.906] [info] Loaded new controller.\nSetting Torch policy to terminated.\n[2026-03-17 16:22:52.907] [info] Terminating custom controller, switching to default controller.\n[2026-03-17 16:22:53.033] [info] Moving to width 0.08 at speed=0.1\n",
+  "remote_pid": 647648,
+  "started_at": "2026-03-17T16:22:12",
+  "state": "failed",
+  "stderr_log": "/tmp/vlalab/start_robot_server.stderr.log",
+  "stdout_log": "/tmp/vlalab/start_robot_server.stdout.log",
+  "submitted_at": "2026-03-17T16:22:12",
+  "target_id": "client"
+}

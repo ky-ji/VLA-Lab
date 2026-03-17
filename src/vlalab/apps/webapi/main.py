@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+import mimetypes
 from typing import List, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 import vlalab
 
@@ -42,11 +42,12 @@ from .replay_service import delete_run, generate_attention, load_attention_state
 from .service import (
     build_latency_compare,
     count_runs,
-    get_runs_dir,
+    get_runs_source,
     list_projects,
     list_run_summaries,
     load_run_detail,
     load_run_steps,
+    read_artifact_bytes,
     resolve_artifact_path,
 )
 
@@ -93,12 +94,12 @@ def root() -> dict:
 
 @app.get("/api/overview", response_model=OverviewResponse)
 def overview() -> OverviewResponse:
-    runs_dir = get_runs_dir()
-    projects = list_projects(runs_dir)
-    run_count = count_runs(runs_dir)
-    latest_runs = list_run_summaries(runs_dir, limit=6)
+    runs_source = get_runs_source()
+    projects = list_projects(runs_source)
+    run_count = count_runs(runs_source)
+    latest_runs = list_run_summaries(runs_source, limit=6)
     return OverviewResponse(
-        runs_dir=str(runs_dir),
+        runs_dir=runs_source.display_path,
         project_count=len(projects),
         run_count=run_count,
         latest_runs=latest_runs,
@@ -107,10 +108,10 @@ def overview() -> OverviewResponse:
 
 @app.get("/api/projects", response_model=ProjectListResponse)
 def projects() -> ProjectListResponse:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     return ProjectListResponse(
-        runs_dir=str(runs_dir),
-        projects=list_projects(runs_dir),
+        runs_dir=runs_source.display_path,
+        projects=list_projects(runs_source),
     )
 
 
@@ -121,16 +122,16 @@ def runs(
     limit: int = Query(default=100, ge=1, le=1000),
     include_latency: bool = False,
 ) -> RunListResponse:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     items = list_run_summaries(
-        runs_dir,
+        runs_source,
         project=project,
         search=search,
         limit=limit,
         include_latency=include_latency,
     )
     return RunListResponse(
-        runs_dir=str(runs_dir),
+        runs_dir=runs_source.display_path,
         total=len(items),
         items=items,
     )
@@ -138,9 +139,9 @@ def runs(
 
 @app.get("/api/runs/{project}/{run_name}", response_model=RunDetail)
 def run_detail(project: str, run_name: str) -> RunDetail:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     try:
-        return load_run_detail(runs_dir, project, run_name)
+        return load_run_detail(runs_source, project, run_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -152,9 +153,9 @@ def run_steps(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=500),
 ) -> RunStepsResponse:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     try:
-        total, items = load_run_steps(runs_dir, project, run_name, offset=offset, limit=limit)
+        total, items = load_run_steps(runs_source, project, run_name, offset=offset, limit=limit)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RunStepsResponse(
@@ -168,27 +169,31 @@ def run_steps(
 
 @app.get("/api/runs/{project}/{run_name}/replay")
 def run_replay(project: str, run_name: str) -> dict:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     try:
-        return load_run_replay(runs_dir, project, run_name)
+        return load_run_replay(runs_source, project, run_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.delete("/api/runs/{project}/{run_name}")
 def delete_run_route(project: str, run_name: str) -> dict:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     try:
-        return delete_run(runs_dir, project, run_name)
+        return delete_run(runs_source, project, run_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/runs/{project}/{run_name}/artifacts/{artifact_path:path}")
-def artifact(project: str, run_name: str, artifact_path: str) -> FileResponse:
-    runs_dir = get_runs_dir()
+def artifact(project: str, run_name: str, artifact_path: str):
+    runs_source = get_runs_source()
     try:
-        path = resolve_artifact_path(runs_dir, project, run_name, artifact_path)
+        if runs_source.is_remote:
+            content = read_artifact_bytes(runs_source, project, run_name, artifact_path)
+            media_type = mimetypes.guess_type(artifact_path)[0] or "application/octet-stream"
+            return Response(content=content, media_type=media_type)
+        path = resolve_artifact_path(runs_source, project, run_name, artifact_path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FileResponse(path)
@@ -203,10 +208,10 @@ def run_attention(
     model_path_override: Optional[str] = None,
     prompt_override: Optional[str] = None,
 ) -> dict:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     try:
         return load_attention_state(
-            runs_dir,
+            runs_source,
             project,
             run_name,
             step_idx=step_idx,
@@ -226,13 +231,13 @@ def run_attention_generate(
     run_name: str,
     payload: dict = Body(default_factory=dict),
 ) -> dict:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     requested_steps = payload.get("requested_steps") or []
     if not requested_steps:
         raise HTTPException(status_code=400, detail="requested_steps is required")
     try:
         return generate_attention(
-            runs_dir,
+            runs_source,
             project,
             run_name,
             requested_steps=[int(idx) for idx in requested_steps],
@@ -253,9 +258,9 @@ def latency_compare(
     runs: List[str] = Query(default_factory=list),
     max_points: int = Query(default=300, ge=10, le=5000),
 ) -> LatencyCompareResponse:
-    runs_dir = get_runs_dir()
+    runs_source = get_runs_source()
     try:
-        return build_latency_compare(runs_dir, runs, max_points=max_points)
+        return build_latency_compare(runs_source, runs, max_points=max_points)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

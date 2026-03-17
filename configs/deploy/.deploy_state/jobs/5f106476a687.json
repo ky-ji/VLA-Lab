@@ -1,0 +1,21 @@
+{
+  "_background": true,
+  "_ssh_host": "volcengine",
+  "_status_path": "/tmp/vlalab/start_model_server.stdout.log.5f106476a687.status",
+  "_values": {
+    "model_server_config_path": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/server_config_groot.py"
+  },
+  "command_id": "start_model_server",
+  "error": "Remote exit code: 1",
+  "finished_at": "2026-03-16T20:14:05+08:00",
+  "id": "5f106476a687",
+  "last_stderr": "\nEnvironmentNameNotFound: Could not find conda environment: groot\nYou can list all discoverable environments with `conda info --envs`.\n\n\n",
+  "last_stdout": "",
+  "remote_pid": 2168692,
+  "started_at": "2026-03-16T20:14:02",
+  "state": "failed",
+  "stderr_log": "/tmp/vlalab/start_model_server.stderr.log",
+  "stdout_log": "/tmp/vlalab/start_model_server.stdout.log",
+  "submitted_at": "2026-03-16T20:14:02",
+  "target_id": "server"
+}

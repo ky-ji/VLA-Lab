@@ -1,0 +1,21 @@
+{
+  "_background": true,
+  "_ssh_host": "volcengine",
+  "_status_path": "/tmp/vlalab/start_model_server.stdout.log.5cf03ab1012a.status",
+  "_values": {
+    "model_server_config_path": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/server_config_groot.py"
+  },
+  "command_id": "start_model_server",
+  "error": "Remote exit code: 2",
+  "finished_at": "2026-03-16T20:23:44+08:00",
+  "id": "5cf03ab1012a",
+  "last_stderr": "usage: inference_server_groot.py [-h] [--model_path MODEL_PATH]\n                                 [--device DEVICE] [--port PORT]\n                                 [--prompt PROMPT] [--num_images NUM_IMAGES]\n                                 [--vlalab_project VLALAB_PROJECT]\ninference_server_groot.py: error: unrecognized arguments: --config /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/server_config_groot.py\n",
+  "last_stdout": "",
+  "remote_pid": 2508754,
+  "started_at": "2026-03-16T20:23:39",
+  "state": "failed",
+  "stderr_log": "/tmp/vlalab/start_model_server.stderr.log",
+  "stdout_log": "/tmp/vlalab/start_model_server.stdout.log",
+  "submitted_at": "2026-03-16T20:23:39",
+  "target_id": "server"
+}

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,12 +14,17 @@ from vlalab.attention import (
 )
 
 from .service import (
+    _remote_load_meta,
+    _remote_load_steps,
     build_run_summary,
+    delete_run_tree,
     image_url,
     latency_ms,
     timing_summary,
     load_meta,
+    load_run_detail,
     load_steps,
+    remote_list_attention_caches,
     resolve_run_path,
 )
 
@@ -295,10 +299,17 @@ def _build_step_details(project: str, run_name: str, steps: List[Dict[str, Any]]
 
 
 def load_run_replay(runs_dir: Path, project: str, run_name: str) -> Dict[str, Any]:
-    run_path = resolve_run_path(runs_dir, project, run_name)
-    meta = load_meta(run_path)
-    steps = load_steps(run_path)
-    summary = build_run_summary(run_path, meta=meta, steps=steps, include_latency=True)
+    try:
+        run_path = resolve_run_path(runs_dir, project, run_name)
+        meta = load_meta(run_path)
+        steps = load_steps(run_path)
+        summary = build_run_summary(run_path, meta=meta, steps=steps, include_latency=True)
+        attention_caches = list_attention_caches(run_path)
+    except RuntimeError:
+        meta = _remote_load_meta(runs_dir, project, run_name)
+        steps = _remote_load_steps(runs_dir, project, run_name)
+        summary = load_run_detail(runs_dir, project, run_name, recent_steps=0).summary
+        attention_caches = remote_list_attention_caches(runs_dir, project, run_name)
 
     extracted = _extract_state_action_data(steps, meta)
     states_arr = extracted["states_arr"]
@@ -323,8 +334,6 @@ def load_run_replay(runs_dir: Path, project: str, run_name: str) -> Dict[str, An
                 if camera_name and camera_name not in camera_names:
                     camera_names.append(camera_name)
 
-    attention_caches = list_attention_caches(run_path)
-
     return {
         "summary": summary.model_dump(),
         "meta": meta,
@@ -348,8 +357,7 @@ def load_run_replay(runs_dir: Path, project: str, run_name: str) -> Dict[str, An
 
 
 def delete_run(runs_dir: Path, project: str, run_name: str) -> Dict[str, str]:
-    run_path = resolve_run_path(runs_dir, project, run_name)
-    shutil.rmtree(run_path)
+    delete_run_tree(runs_dir, project, run_name)
     return {"status": "deleted", "run_id": f"{project}/{run_name}"}
 
 
@@ -386,7 +394,10 @@ def load_attention_state(
     model_path_override: Optional[str] = None,
     prompt_override: Optional[str] = None,
 ) -> Dict[str, Any]:
-    run_path = resolve_run_path(runs_dir, project, run_name)
+    try:
+        run_path = resolve_run_path(runs_dir, project, run_name)
+    except RuntimeError as exc:
+        raise RuntimeError("Attention is not supported when runs are read from the remote model server yet.") from exc
     backend = load_attention_backend()
     _, _, model_path, prompt = backend.resolve_run_context(
         run_path,
@@ -438,7 +449,10 @@ def generate_attention(
     model_path_override: Optional[str] = None,
     prompt_override: Optional[str] = None,
 ) -> Dict[str, Any]:
-    run_path = resolve_run_path(runs_dir, project, run_name)
+    try:
+        run_path = resolve_run_path(runs_dir, project, run_name)
+    except RuntimeError as exc:
+        raise RuntimeError("Attention is not supported when runs are read from the remote model server yet.") from exc
     backend = load_attention_backend()
     _, _, model_path, prompt = backend.resolve_run_context(
         run_path,

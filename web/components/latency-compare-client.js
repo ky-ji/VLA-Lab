@@ -52,8 +52,8 @@ export default function LatencyCompareClient({ initialRuns = [], initialCompare 
       : initialRuns.slice(0, 3).map((run) => run.run_id)
   );
   const [activeTab, setActiveTab] = useState("series");
-  const [loadingRuns, setLoadingRuns] = useState(false);
-  const [loadingCompare, setLoadingCompare] = useState(false);
+  const [loadingRuns, setLoadingRuns] = useState(initialRuns.length === 0);
+  const [loadingCompare, setLoadingCompare] = useState(initialCompare == null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -66,8 +66,7 @@ export default function LatencyCompareClient({ initialRuns = [], initialCompare 
     async function loadRuns() {
       try {
         const data = await browserFetchJson("/api/runs", {
-          include_latency: true,
-          limit: 400,
+          limit: 240,
         });
         if (ignore) {
           return;
@@ -156,6 +155,7 @@ export default function LatencyCompareClient({ initialRuns = [], initialCompare 
 
   const selectedSet = new Set(selectedRunIds);
   const compareItems = compare?.items || [];
+  const showComparePlaceholder = loadingCompare && compareItems.length === 0;
 
   function toggleRun(runId) {
     setSelectedRunIds((current) =>
@@ -236,33 +236,41 @@ export default function LatencyCompareClient({ initialRuns = [], initialCompare 
 
       {activeTab === "series" ? (
         <section className="section-stack">
-          <LineChart
-            title="Transport latency"
-            xLabel="X 轴: step"
-            series={compareItems.map((item, index) => ({
-              name: item.run.run_name,
-              values: item.series.transport_latency_ms,
-              color: pickColor(index),
-            }))}
-          />
-          <LineChart
-            title="Inference latency"
-            xLabel="X 轴: step"
-            series={compareItems.map((item, index) => ({
-              name: item.run.run_name,
-              values: item.series.inference_latency_ms,
-              color: pickColor(index),
-            }))}
-          />
-          <LineChart
-            title="Total latency"
-            xLabel="X 轴: step"
-            series={compareItems.map((item, index) => ({
-              name: item.run.run_name,
-              values: item.series.total_latency_ms,
-              color: pickColor(index),
-            }))}
-          />
+          {showComparePlaceholder ? (
+            <div className="placeholder-panel">
+              <p>正在加载时延对比 ...</p>
+            </div>
+          ) : (
+            <>
+              <LineChart
+                title="Transport latency"
+                xLabel="X 轴: step"
+                series={compareItems.map((item, index) => ({
+                  name: item.run.run_name,
+                  values: item.series.transport_latency_ms,
+                  color: pickColor(index),
+                }))}
+              />
+              <LineChart
+                title="Inference latency"
+                xLabel="X 轴: step"
+                series={compareItems.map((item, index) => ({
+                  name: item.run.run_name,
+                  values: item.series.inference_latency_ms,
+                  color: pickColor(index),
+                }))}
+              />
+              <LineChart
+                title="Total latency"
+                xLabel="X 轴: step"
+                series={compareItems.map((item, index) => ({
+                  name: item.run.run_name,
+                  values: item.series.total_latency_ms,
+                  color: pickColor(index),
+                }))}
+              />
+            </>
+          )}
         </section>
       ) : null}
 
@@ -388,7 +396,9 @@ export default function LatencyCompareClient({ initialRuns = [], initialCompare 
             <p className="eyebrow">Inventory</p>
             <h2>完整 run 摘要</h2>
           </div>
-          <span className="muted">{loadingCompare ? "更新对比中..." : "对比数据已同步"}</span>
+          <span className="muted">
+            {loadingRuns ? "加载 run 列表中..." : loadingCompare ? "更新对比中..." : "对比数据已同步"}
+          </span>
         </div>
         <RunTable runs={filteredRuns} showProject />
       </section>

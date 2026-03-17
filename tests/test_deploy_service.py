@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from vlalab.apps.webapi import deploy_service as ds
+from vlalab.apps.webapi import service as web_service
 from vlalab.apps.webapi.models import DeployRunRequest, DeployTargetConnection
 
 
@@ -134,11 +135,48 @@ def test_load_deploy_config_rejects_missing_required_placeholder(tmp_path):
         ds.load_deploy_config(str(path))
 
 
+def test_get_runs_source_uses_remote_dashboard_runs_dir_when_configured(tmp_path, monkeypatch):
+    payload = _base_config()
+    payload["runs_dir"] = "shared_runs"
+    path = _write_config(tmp_path, payload)
+    monkeypatch.setenv("VLALAB_DEPLOY_CONFIG", str(path))
+    monkeypatch.delenv("VLALAB_DIR", raising=False)
+
+    runs_source = web_service.get_runs_source()
+
+    assert runs_source.is_remote
+    assert runs_source.path == "/srv/model/shared_runs"
+    assert runs_source.display_path == "/srv/model"
+    assert runs_source.ssh_host == "groot-gpu"
+
+
+def test_get_runs_dir_falls_back_to_default_when_dashboard_runs_dir_missing(tmp_path, monkeypatch):
+    path = _write_config(tmp_path)
+    monkeypatch.setenv("VLALAB_DEPLOY_CONFIG", str(path))
+    monkeypatch.delenv("VLALAB_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    runs_dir = web_service.get_runs_dir()
+
+    assert runs_dir == (tmp_path / "vlalab_runs").resolve()
+
+
+def test_get_runs_dir_rejects_non_string_dashboard_runs_dir(tmp_path, monkeypatch):
+    payload = _base_config()
+    payload["runs_dir"] = {"path": "/tmp/runs"}
+    path = _write_config(tmp_path, payload)
+    monkeypatch.setenv("VLALAB_DEPLOY_CONFIG", str(path))
+    monkeypatch.delenv("VLALAB_DIR", raising=False)
+
+    with pytest.raises(ValueError, match="runs_dir"):
+        web_service.get_runs_dir()
+
+
 def test_build_deploy_overview_returns_fixed_sections(tmp_path, monkeypatch):
     path = _write_config(tmp_path)
     monkeypatch.setenv("VLALAB_DEPLOY_CONFIG", str(path))
 
-    def fake_run(command, capture_output, text, timeout, check):
+    def fake_run(command, capture_output, text, stdin, timeout, check):
         assert command[0] == "ssh"
         return subprocess.CompletedProcess(command, 0, "__vlalab_ok__\n", "")
 

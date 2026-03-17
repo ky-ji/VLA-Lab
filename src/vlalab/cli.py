@@ -46,6 +46,28 @@ def _cleanup_pid_file(port: int, prefix: str = "view") -> None:
     _get_pid_file(port, prefix=prefix).unlink(missing_ok=True)
 
 
+def _terminate_vlalab_process_on_port(port: int, force: bool = False) -> bool:
+    """Terminate a VLA-Lab process tracked by a PID file on the given port."""
+    for prefix in ("view", "api", "web"):
+        pid_file = _get_pid_file(port, prefix=prefix)
+        if not pid_file.exists():
+            continue
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)
+            sig = signal.SIGKILL if force else signal.SIGTERM
+            os.kill(pid, sig)
+            action = "Killed" if force else "Terminated"
+            console.print(f"[yellow]{action} previous VLA-Lab process (PID: {pid})[/yellow]")
+            pid_file.unlink(missing_ok=True)
+            return True
+        except (ProcessLookupError, ValueError):
+            pid_file.unlink(missing_ok=True)
+        except PermissionError:
+            console.print(f"[red]Permission denied to kill process[/red]")
+    return False
+
+
 def _resolve_web_dir() -> Path:
     """Locate the bundled Next.js frontend."""
     candidates = [
@@ -64,25 +86,8 @@ def _kill_process_on_port(port: int, force: bool = False) -> bool:
     Returns True if a process was killed.
     """
     # Method 1: Check PID file first
-    for prefix in ("view", "api", "web"):
-        pid_file = _get_pid_file(port, prefix=prefix)
-        if not pid_file.exists():
-            continue
-        try:
-            pid = int(pid_file.read_text().strip())
-            os.kill(pid, 0)
-            if force:
-                os.kill(pid, signal.SIGKILL)
-                console.print(f"[yellow]Killed previous VLA-Lab process (PID: {pid})[/yellow]")
-            else:
-                os.kill(pid, signal.SIGTERM)
-                console.print(f"[yellow]Terminated previous VLA-Lab process (PID: {pid})[/yellow]")
-            pid_file.unlink(missing_ok=True)
-            return True
-        except (ProcessLookupError, ValueError):
-            pid_file.unlink(missing_ok=True)
-        except PermissionError:
-            console.print(f"[red]Permission denied to kill process[/red]")
+    if _terminate_vlalab_process_on_port(port, force=force):
+        return True
     
     # Method 2: Use fuser/lsof to find process on port
     try:
@@ -139,22 +144,62 @@ def _cleanup_on_exit(port: int, proc):
     _terminate_process_group(proc)
 
 
-def _ensure_port_available(port: int, action_hint: str) -> None:
-    """Ensure a port is free before launching a new service."""
+def _wait_for_port_release(port: int, attempts: int = 10, delay_s: float = 0.5) -> bool:
+    """Wait for a port to become available."""
     import time
 
-    if not _is_port_in_use(port):
-        return
-
-    console.print(f"[yellow]Port {port} is in use, killing previous process...[/yellow]")
-    _kill_process_on_port(port, force=True)
-    for _ in range(10):
-        time.sleep(0.5)
+    for _ in range(attempts):
         if not _is_port_in_use(port):
-            return
+            return True
+        time.sleep(delay_s)
+    return not _is_port_in_use(port)
 
-    console.print(f"[red]Port {port} still in use after cleanup.[/red]")
-    console.print(f"[yellow]Try: {action_hint}[/yellow]")
+
+def _find_available_port(start_port: int, reserved_ports: Optional[set[int]] = None, limit: int = 50) -> Optional[int]:
+    """Find the next available port, skipping any reserved ports."""
+    reserved = reserved_ports or set()
+    for candidate in range(start_port, start_port + limit):
+        if candidate in reserved:
+            continue
+        if not _is_port_in_use(candidate):
+            return candidate
+    return None
+
+
+def _resolve_launch_port(
+    port: int,
+    purpose: str,
+    option_flag: str,
+    reserved_ports: Optional[set[int]] = None,
+) -> int:
+    """Resolve the port to use for a service, preferring the requested port when possible."""
+    reserved = reserved_ports or set()
+
+    if port not in reserved and not _is_port_in_use(port):
+        return port
+
+    if port not in reserved:
+        console.print(f"[yellow]Port {port} is in use.[/yellow]")
+        if _terminate_vlalab_process_on_port(port, force=True):
+            if _wait_for_port_release(port):
+                return port
+            console.print(f"[yellow]Port {port} is still busy after stopping the previous VLA-Lab process.[/yellow]")
+        else:
+            console.print(f"[yellow]Port {port} belongs to another process, so VLA-Lab will use a different port.[/yellow]")
+    else:
+        console.print(f"[yellow]Port {port} is already reserved by another VLA-Lab service.[/yellow]")
+
+    candidate = _find_available_port(port + 1, reserved_ports=reserved)
+    if candidate is not None:
+        console.print(
+            f"[green]{purpose} will use port {candidate} instead of {port}.[/green]"
+        )
+        console.print(
+            f"[blue]Use `{option_flag} {candidate}` if you want to pin this explicitly.[/blue]"
+        )
+        return candidate
+
+    console.print(f"[red]Could not find a free port near {port} for {purpose}.[/red]")
     raise click.Abort()
 
 
@@ -205,6 +250,7 @@ def _launch_web_services(
     host: str,
     api_port: int,
     web_port: int,
+    web_option_flag: str,
     frontend: bool,
     install: bool,
     run_dir: str,
@@ -219,9 +265,14 @@ def _launch_web_services(
         console.print("[red]api-port and web-port must be different when frontend is enabled.[/red]")
         raise click.Abort()
 
-    _ensure_port_available(api_port, f"vlalab view --api-port {api_port + 1}")
+    api_port = _resolve_launch_port(api_port, "API", "--api-port")
     if frontend:
-        _ensure_port_available(web_port, f"vlalab view --port {web_port + 1}")
+        web_port = _resolve_launch_port(
+            web_port,
+            "Frontend",
+            web_option_flag,
+            reserved_ports={api_port},
+        )
 
     env = os.environ.copy()
     if run_dir:
@@ -353,6 +404,7 @@ def view(port: Optional[int], api_port: int, host: str, install: bool, run_dir: 
         host=host,
         api_port=api_port,
         web_port=resolved_port,
+        web_option_flag="--port",
         frontend=True,
         install=install,
         run_dir=run_dir,
@@ -390,6 +442,7 @@ def serve(host: str, api_port: int, web_port: int, frontend: bool, install: bool
         host=host,
         api_port=api_port,
         web_port=web_port,
+        web_option_flag="--web-port",
         frontend=frontend,
         install=install,
         run_dir=run_dir,

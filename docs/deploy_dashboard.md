@@ -31,6 +31,7 @@ deploy 只读取一个 JSON 配置文件，优先级如下：
 
 ```json
 {
+  "runs_dir": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/vlalab_runs",
   "targets": {
     "server": {
       "label": "Model Server",
@@ -94,8 +95,15 @@ deploy 只读取一个 JSON 配置文件，优先级如下：
 }
 ```
 
+其中 `runs_dir` 是可选项，用来指定 `/`、`/runs`、`/latency` 等页面读取的 runs 根目录。
+这里的路径语义是 `targets.server` 这台机器上的远端路径，后端会通过 SSH 到 `server` 读取 runs。
+如果写绝对路径，就直接使用；如果写相对路径，则会相对 `targets.server.workdir` 解析。
+如果不配置，则继续使用原来的本地默认逻辑（`--run-dir` / `VLALAB_DIR` / 自动检测 `vlalab_runs`）。
+当前远端 runs 模式已支持列表、详情、replay、图片和删除；attention 相关生成仍然只支持本地 runs。
+
 ## 配置约束
 
+- `runs_dir` 可选；如果提供，必须是 `server` 机器上的路径字符串
 - `targets` 必须同时包含 `server` 和 `client`
 - `inputs` 必须同时包含 `model_server_config_path`、`inference_client_config_path`
 - `commands` 必须同时包含 4 个固定命令 ID

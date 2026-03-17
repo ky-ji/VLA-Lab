@@ -14,6 +14,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
 from .models import (
@@ -92,6 +93,15 @@ class DeployConfig:
     commands: Dict[str, CommandConfig]
 
 
+@dataclass(frozen=True)
+class DashboardRunsConfig:
+    runs_dir: str
+    workdir: str
+    target_id: str
+    ssh_host: str
+    shell: str = "bash -lc"
+
+
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -131,6 +141,38 @@ def _resolve_optional_path(value: Optional[str], base_dir: Path, default: Path) 
     if not candidate.is_absolute():
         candidate = (base_dir / candidate).resolve()
     return candidate
+
+
+def resolve_dashboard_runs_config(config_path: Optional[str] = None) -> Optional[DashboardRunsConfig]:
+    """Return the optional remote runs directory defined in the deploy dashboard JSON."""
+    path = resolve_deploy_config_path(config_path)
+    if not path.exists():
+        return None
+
+    raw = _load_json(path)
+    raw_runs_dir = raw.get("runs_dir")
+    if raw_runs_dir is None:
+        return None
+    if not isinstance(raw_runs_dir, str):
+        raise ValueError("Deploy config field `runs_dir` must be a string when provided")
+
+    runs_dir = raw_runs_dir.strip()
+    if not runs_dir:
+        return None
+
+    config = load_deploy_config(str(path))
+    target = config.targets["server"]
+    remote_runs_dir = PurePosixPath(runs_dir)
+    if not remote_runs_dir.is_absolute():
+        remote_runs_dir = PurePosixPath(target.workdir) / remote_runs_dir
+
+    return DashboardRunsConfig(
+        runs_dir=str(remote_runs_dir),
+        workdir=target.workdir,
+        target_id=target.id,
+        ssh_host=target.ssh_host,
+        shell=target.shell,
+    )
 
 
 def _ordered_placeholders(template: str) -> List[str]:

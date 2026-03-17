@@ -1,4 +1,5 @@
 {
+  "runs_dir": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/vlalab_runs",
   "targets": {
     "server": {
       "label": "Model Server",

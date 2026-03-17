@@ -1,0 +1,21 @@
+{
+  "_background": true,
+  "_ssh_host": "volcengine",
+  "_status_path": "/tmp/vlalab/start_model_server.stdout.log.682f67ebb4a6.status",
+  "_values": {
+    "model_server_config_path": "/home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/configs/server_config_groot.py"
+  },
+  "command_id": "start_model_server",
+  "error": "Command '['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'volcengine', 'bash -lc \\'mkdir -p /tmp/vlalab && : > /tmp/vlalab/start_model_server.stdout.log && : > /tmp/vlalab/start_model_server.stderr.log && rm -f /tmp/vlalab/start_model_server.stdout.log.682f67ebb4a6.status && nohup bash -lc \\'\"\\'\"\\'if ! cd /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server; then code=$?; printf \\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'%s\\\\n%s\\\\n\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\' \"$code\" \"$(date -Iseconds)\" > /tmp/vlalab/start_model_server.stdout.log.682f67ebb4a6.status; exit \"$code\"; fi; source /opt/miniconda3/etc/profile.d/conda.sh && uv run python inference_server_groot.py --config /home/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/realworld_deploy/server/configs/server_config_groot.py; code=$?; printf \\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'%s\\\\n%s\\\\n\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\'\"\\' \"$code\" \"$(date -Iseconds)\" > /tmp/vlalab/start_model_server.stdout.log.682f67ebb4a6.status; exit \"$code\"\\'\"\\'\"\\' >/tmp/vlalab/start_model_server.stdout.log 2>/tmp/vlalab/start_model_server.stderr.log < /dev/null & echo $!\\'']' timed out after 30.0 seconds",
+  "finished_at": "2026-03-16T20:29:21",
+  "id": "682f67ebb4a6",
+  "last_stderr": "",
+  "last_stdout": "",
+  "remote_pid": null,
+  "started_at": "2026-03-16T20:28:51",
+  "state": "failed",
+  "stderr_log": "/tmp/vlalab/start_model_server.stderr.log",
+  "stdout_log": "/tmp/vlalab/start_model_server.stdout.log",
+  "submitted_at": "2026-03-16T20:28:51",
+  "target_id": "server"
+}
