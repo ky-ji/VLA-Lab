@@ -1796,16 +1796,23 @@ code.inline-code {
 
 .deploy-workflow-card {
   display: grid;
-  gap: 16px;
+  gap: 14px;
   padding: 22px;
   min-height: 620px;
   max-height: 620px;
+  grid-template-rows: auto minmax(0, 1fr);
   border-radius: 22px;
   border: 1px solid rgba(31, 41, 51, 0.08);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(240, 253, 250, 0.76)),
     radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 32%);
   overflow: hidden;
+}
+
+.deploy-workflow-top {
+  display: grid;
+  gap: 12px;
+  align-content: start;
 }
 
 .deploy-target-header,
@@ -1863,7 +1870,11 @@ code.inline-code {
 
 .deploy-meta-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  max-height: 168px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .deploy-meta-row code {
@@ -2073,8 +2084,9 @@ code.inline-code {
 }
 
 .deploy-command-block.is-scrollable {
-  height: 168px;
-  max-height: 168px;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -2085,12 +2097,16 @@ code.inline-code {
 .deploy-log-stack {
   display: grid;
   gap: 12px;
+  min-height: 0;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 
 .deploy-log-panel {
   display: grid;
   gap: 8px;
-  min-height: 214px;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .deploy-log-header {
@@ -2100,7 +2116,8 @@ code.inline-code {
 }
 
 .deploy-log-empty {
-  min-height: 168px;
+  min-height: 0;
+  height: 100%;
   display: flex;
   align-items: center;
 }

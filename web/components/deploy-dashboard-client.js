@@ -247,68 +247,70 @@ function CommandCard({ command, target, missingInputs, busy, activeJob, stopping
 function JobCard({ job, targetLabel, stopping, onStop }) {
   return (
     <article className="deploy-workflow-card">
-      <div className="deploy-target-header">
-        <div>
-          <p className="eyebrow">{targetLabel}</p>
-          <h3>{prettyKey(job.command_id)}</h3>
+      <div className="deploy-workflow-top">
+        <div className="deploy-target-header">
+          <div>
+            <p className="eyebrow">{targetLabel}</p>
+            <h3>{prettyKey(job.command_id)}</h3>
+          </div>
+          <span className={`deploy-status-chip ${stateToneClass(job.state)}`}>{prettyState(job.state)}</span>
         </div>
-        <span className={`deploy-status-chip ${stateToneClass(job.state)}`}>{prettyState(job.state)}</span>
-      </div>
-      <div className="deploy-meta-list">
-        <div className="deploy-meta-row">
-          <span className="stat-label">Job ID</span>
-          <code>{job.id}</code>
+        <div className="deploy-meta-list">
+          <div className="deploy-meta-row">
+            <span className="stat-label">Job ID</span>
+            <code>{job.id}</code>
+          </div>
+          <div className="deploy-meta-row">
+            <span className="stat-label">Remote PID</span>
+            <span>{job.remote_pid || "--"}</span>
+          </div>
+          <div className="deploy-meta-row">
+            <span className="stat-label">Submitted</span>
+            <span>{formatTime(job.submitted_at)}</span>
+          </div>
+          <div className="deploy-meta-row">
+            <span className="stat-label">Started</span>
+            <span>{formatTime(job.started_at)}</span>
+          </div>
+          <div className="deploy-meta-row">
+            <span className="stat-label">Finished</span>
+            <span>{formatTime(job.finished_at)}</span>
+          </div>
+          {job.error ? (
+            <div className="deploy-meta-row is-error">
+              <span className="stat-label">Error</span>
+              <span>{job.error}</span>
+            </div>
+          ) : null}
         </div>
-        <div className="deploy-meta-row">
-          <span className="stat-label">Remote PID</span>
-          <span>{job.remote_pid || "--"}</span>
-        </div>
-        <div className="deploy-meta-row">
-          <span className="stat-label">Submitted</span>
-          <span>{formatTime(job.submitted_at)}</span>
-        </div>
-        <div className="deploy-meta-row">
-          <span className="stat-label">Started</span>
-          <span>{formatTime(job.started_at)}</span>
-        </div>
-        <div className="deploy-meta-row">
-          <span className="stat-label">Finished</span>
-          <span>{formatTime(job.finished_at)}</span>
-        </div>
-        {job.error ? (
-          <div className="deploy-meta-row is-error">
-            <span className="stat-label">Error</span>
-            <span>{job.error}</span>
+
+        {(job.stdout_log || job.stderr_log) ? (
+          <div className="deploy-command-meta">
+            <div>
+              <span className="stat-label">stdout</span>
+              <code>{job.stdout_log || "--"}</code>
+            </div>
+            <div>
+              <span className="stat-label">stderr</span>
+              <code>{job.stderr_log || "--"}</code>
+            </div>
           </div>
         ) : null}
-      </div>
 
-      {(job.stdout_log || job.stderr_log) ? (
-        <div className="deploy-command-meta">
-          <div>
-            <span className="stat-label">stdout</span>
-            <code>{job.stdout_log || "--"}</code>
-          </div>
-          <div>
-            <span className="stat-label">stderr</span>
-            <code>{job.stderr_log || "--"}</code>
-          </div>
+        <div className="deploy-action-row">
+          {job.stoppable ? (
+            <button
+              type="button"
+              className="deploy-action-button is-danger"
+              onClick={() => onStop(job.id)}
+              disabled={stopping}
+            >
+              {stopping ? "停止中..." : "停止命令"}
+            </button>
+          ) : (
+            <span className="muted">当前任务不可停止</span>
+          )}
         </div>
-      ) : null}
-
-      <div className="deploy-action-row">
-        {job.stoppable ? (
-          <button
-            type="button"
-            className="deploy-action-button is-danger"
-            onClick={() => onStop(job.id)}
-            disabled={stopping}
-          >
-            {stopping ? "停止中..." : "停止命令"}
-          </button>
-        ) : (
-          <span className="muted">当前任务不可停止</span>
-        )}
       </div>
 
       <div className="deploy-log-stack">
