@@ -58,6 +58,11 @@ class TargetConfig:
     ssh_host: str
     workdir: str
     shell: str = "bash -lc"
+    ssh_user: Optional[str] = None
+    ssh_port: Optional[int] = None
+    ssh_identity_file: Optional[str] = None
+    ssh_config_file: Optional[str] = None
+    ssh_options: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -149,6 +154,13 @@ def _normalize_text(value: Any, field_name: str) -> str:
     return text
 
 
+def _normalize_optional_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def load_deploy_config(config_path: Optional[str] = None) -> DeployConfig:
     path = resolve_deploy_config_path(config_path)
     if not path.exists():
@@ -173,12 +185,44 @@ def load_deploy_config(config_path: Optional[str] = None) -> DeployConfig:
         payload = raw_targets.get(target_id)
         if not isinstance(payload, dict):
             raise ValueError(f"Deploy config is missing target `{target_id}`")
+        ssh_port_raw = payload.get("ssh_port")
+        ssh_port: Optional[int] = None
+        if ssh_port_raw not in {None, ""}:
+            try:
+                ssh_port = int(ssh_port_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Deploy config field `targets.{target_id}.ssh_port` must be an integer") from exc
+            if ssh_port <= 0:
+                raise ValueError(f"Deploy config field `targets.{target_id}.ssh_port` must be > 0")
+
+        ssh_options_raw = payload.get("ssh_options", [])
+        if ssh_options_raw is None:
+            ssh_options_raw = []
+        if not isinstance(ssh_options_raw, list):
+            raise ValueError(f"Deploy config field `targets.{target_id}.ssh_options` must be a list")
+        ssh_options = tuple(str(item).strip() for item in ssh_options_raw if str(item).strip())
+
+        ssh_identity_file_raw = _normalize_optional_text(payload.get("ssh_identity_file"))
+        ssh_config_file_raw = _normalize_optional_text(payload.get("ssh_config_file"))
         targets[target_id] = TargetConfig(
             id=target_id,
             label=_normalize_text(payload.get("label") or target_id.replace("_", " ").title(), f"targets.{target_id}.label"),
             ssh_host=_normalize_text(payload.get("ssh_host"), f"targets.{target_id}.ssh_host"),
             workdir=_normalize_text(payload.get("workdir"), f"targets.{target_id}.workdir"),
             shell=str(payload.get("shell") or "bash -lc").strip() or "bash -lc",
+            ssh_user=_normalize_optional_text(payload.get("ssh_user")),
+            ssh_port=ssh_port,
+            ssh_identity_file=(
+                str(_resolve_optional_path(ssh_identity_file_raw, config_dir, Path(".")))
+                if ssh_identity_file_raw
+                else None
+            ),
+            ssh_config_file=(
+                str(_resolve_optional_path(ssh_config_file_raw, config_dir, Path(".")))
+                if ssh_config_file_raw
+                else None
+            ),
+            ssh_options=ssh_options,
         )
 
     inputs: Dict[str, InputConfig] = {}
@@ -381,15 +425,29 @@ class DeployController:
         while not self._stop_event.wait(3.0):
             self.refresh_jobs()
 
-    def _ssh_prefix(self, ssh_host: str, connect_timeout: int = 5) -> List[str]:
-        return [
+    def _ssh_destination(self, target: TargetConfig) -> str:
+        if target.ssh_user:
+            return f"{target.ssh_user}@{target.ssh_host}"
+        return target.ssh_host
+
+    def _ssh_prefix(self, target: TargetConfig, connect_timeout: int = 5) -> List[str]:
+        command = [
             "ssh",
             "-o",
             "BatchMode=yes",
             "-o",
             f"ConnectTimeout={connect_timeout}",
-            ssh_host,
         ]
+        if target.ssh_config_file:
+            command.extend(["-F", target.ssh_config_file])
+        if target.ssh_identity_file:
+            command.extend(["-i", target.ssh_identity_file])
+        if target.ssh_port is not None:
+            command.extend(["-p", str(target.ssh_port)])
+        for option in target.ssh_options:
+            command.extend(["-o", option])
+        command.append(self._ssh_destination(target))
+        return command
 
     def _shell_command(self, shell: str, script: str) -> str:
         normalized_shell = str(shell or "bash -lc").strip() or "bash -lc"
@@ -407,7 +465,7 @@ class DeployController:
         *,
         timeout: float = 60.0,
     ) -> subprocess.CompletedProcess[str]:
-        command = self._ssh_prefix(target.ssh_host) + [self._shell_command(target.shell, script)]
+        command = self._ssh_prefix(target) + [self._shell_command(target.shell, script)]
         return subprocess.run(
             command,
             capture_output=True,
@@ -419,12 +477,12 @@ class DeployController:
 
     def _run_ssh_host(
         self,
-        ssh_host: str,
+        target: TargetConfig,
         script: str,
         *,
         timeout: float = 20.0,
     ) -> subprocess.CompletedProcess[str]:
-        command = self._ssh_prefix(ssh_host) + [f"bash -lc {shlex.quote(script)}"]
+        command = self._ssh_prefix(target) + [f"bash -lc {shlex.quote(script)}"]
         return subprocess.run(
             command,
             capture_output=True,
@@ -439,7 +497,7 @@ class DeployController:
         target: TargetConfig,
         script: str,
     ) -> subprocess.Popen[str]:
-        command = self._ssh_prefix(target.ssh_host) + [self._shell_command(target.shell, script)]
+        command = self._ssh_prefix(target) + [self._shell_command(target.shell, script)]
         return subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -451,7 +509,7 @@ class DeployController:
 
     def probe_target(self, target_id: str) -> DeployTargetConnection:
         target = self.config.targets[target_id]
-        command = self._ssh_prefix(target.ssh_host, connect_timeout=3) + ["echo __vlalab_ok__"]
+        command = self._ssh_prefix(target, connect_timeout=3) + ["echo __vlalab_ok__"]
         try:
             result = subprocess.run(
                 command,
@@ -662,7 +720,7 @@ class DeployController:
                 return False
         return True
 
-    def _stop_remote_process(self, ssh_host: str, remote_pid: int) -> None:
+    def _stop_remote_process(self, target: TargetConfig, remote_pid: int) -> None:
         pid = int(remote_pid)
         script = (
             f"kill -TERM -- -{pid} >/dev/null 2>&1 || kill -TERM {pid} >/dev/null 2>&1 || true\n"
@@ -670,7 +728,7 @@ class DeployController:
             f"kill -0 -- -{pid} >/dev/null 2>&1 && kill -KILL -- -{pid} >/dev/null 2>&1 || true\n"
             f"kill -0 {pid} >/dev/null 2>&1 && kill -KILL {pid} >/dev/null 2>&1 || true"
         )
-        self._run_ssh_host(ssh_host, script, timeout=10.0)
+        self._run_ssh_host(target, script, timeout=10.0)
 
     def stop_job(self, job_id: str) -> DeployJob:
         with self._lock:
@@ -683,7 +741,7 @@ class DeployController:
             current["state"] = "stopping" if current.get("started_at") else "queued"
             self._persist_job(current)
             future = self._futures.get(job_id)
-            ssh_host = str(current.get("_ssh_host") or "")
+            target = self.config.targets.get(str(current.get("target_id") or ""))
             remote_pid = current.get("remote_pid")
 
         if future is not None and future.cancel():
@@ -692,9 +750,9 @@ class DeployController:
                 return stopped
 
         local_stopped = self._terminate_local_process(job_id, sig=signal.SIGTERM)
-        if remote_pid not in {None, ""} and ssh_host:
+        if remote_pid not in {None, ""} and target is not None:
             try:
-                self._stop_remote_process(ssh_host, int(remote_pid))
+                self._stop_remote_process(target, int(remote_pid))
             except Exception:
                 pass
 
@@ -828,7 +886,7 @@ class DeployController:
 
         if stop_requested:
             try:
-                self._stop_remote_process(target.ssh_host, int(pid_text))
+                self._stop_remote_process(target, int(pid_text))
             except Exception:
                 pass
 
@@ -881,20 +939,20 @@ class DeployController:
                 current["error"] = _trim_output((stderr_text or stdout_text or "").strip())
             self._persist_job(current)
 
-    def _is_remote_pid_alive(self, ssh_host: str, remote_pid: int) -> bool:
+    def _is_remote_pid_alive(self, target: TargetConfig, remote_pid: int) -> bool:
         result = self._run_ssh_host(
-            ssh_host,
+            target,
             f"kill -0 {int(remote_pid)} >/dev/null 2>&1",
             timeout=10.0,
         )
         return result.returncode == 0
 
-    def _read_remote_file_tail(self, ssh_host: str, path: Optional[str], lines: int) -> str:
+    def _read_remote_file_tail(self, target: TargetConfig, path: Optional[str], lines: int) -> str:
         if not path:
             return ""
         safe_lines = max(1, min(int(lines), 500))
         result = self._run_ssh_host(
-            ssh_host,
+            target,
             f"if [ -f {shlex.quote(path)} ]; then tail -n {safe_lines} {shlex.quote(path)}; fi",
             timeout=10.0,
         )
@@ -902,11 +960,11 @@ class DeployController:
             return ""
         return _trim_output(result.stdout or "")
 
-    def _read_remote_status(self, ssh_host: str, path: Optional[str]) -> Tuple[Optional[int], Optional[str]]:
+    def _read_remote_status(self, target: TargetConfig, path: Optional[str]) -> Tuple[Optional[int], Optional[str]]:
         if not path:
             return None, None
         result = self._run_ssh_host(
-            ssh_host,
+            target,
             f"if [ -f {shlex.quote(path)} ]; then cat {shlex.quote(path)}; fi",
             timeout=10.0,
         )
@@ -925,17 +983,17 @@ class DeployController:
         if not job:
             return
 
-        ssh_host = str(job.get("_ssh_host") or "")
+        target = self.config.targets.get(str(job.get("target_id") or ""))
         remote_pid = job.get("remote_pid")
-        if not ssh_host or remote_pid in {None, ""}:
+        if target is None or remote_pid in {None, ""}:
             return
 
-        stdout_text = self._read_remote_file_tail(ssh_host, job.get("stdout_log"), lines=60)
-        stderr_text = self._read_remote_file_tail(ssh_host, job.get("stderr_log"), lines=60)
+        stdout_text = self._read_remote_file_tail(target, job.get("stdout_log"), lines=60)
+        stderr_text = self._read_remote_file_tail(target, job.get("stderr_log"), lines=60)
 
         alive = False
         try:
-            alive = self._is_remote_pid_alive(ssh_host, int(remote_pid))
+            alive = self._is_remote_pid_alive(target, int(remote_pid))
         except Exception:
             alive = False
 
@@ -952,7 +1010,7 @@ class DeployController:
                 self._persist_job(current)
                 return
 
-        exit_code, finished_at = self._read_remote_status(ssh_host, job.get("_status_path"))
+        exit_code, finished_at = self._read_remote_status(target, job.get("_status_path"))
         with self._lock:
             current = self._jobs.get(job_id)
             if current is None:
@@ -986,8 +1044,10 @@ class DeployController:
         content = str(job.get(cache_key) or "")
         path = job.get(path_key)
 
-        if job.get("_background") and job.get("_ssh_host") and path:
-            content = self._read_remote_file_tail(str(job["_ssh_host"]), str(path), lines)
+        if job.get("_background") and path:
+            target = self.config.targets.get(str(job.get("target_id") or ""))
+            if target is not None:
+                content = self._read_remote_file_tail(target, str(path), lines)
             with self._lock:
                 current = self._jobs.get(job_id)
                 if current is not None:
