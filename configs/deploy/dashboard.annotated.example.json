@@ -1,0 +1,83 @@
+{
+  "_comment": "Valid JSON example for VLA-Lab deploy. Keys starting with _comment are ignored by the current loader, so you can keep or remove them.",
+  "_comment_recommendation": "Prefer explicit SSH fields below instead of relying on ~/.ssh/config on the machine that runs the dashboard.",
+  "targets": {
+    "server": {
+      "_comment": "Model server machine. ssh_host can be an alias, hostname, or IP.",
+      "label": "Model Server",
+      "ssh_host": "10.0.0.8",
+      "ssh_user": "deploy",
+      "ssh_port": 22,
+      "ssh_identity_file": "./keys/server_id",
+      "_comment_ssh_options": "Each item becomes one `ssh -o ...` flag. Useful for bastion, host key policy, etc.",
+      "ssh_options": [
+        "ProxyJump=bastion",
+        "StrictHostKeyChecking=no"
+      ],
+      "workdir": "/home/deploy/RealWorld-GR00T/realworld_deploy/server",
+      "shell": "bash -lc"
+    },
+    "client": {
+      "_comment": "Robot-side inference client machine.",
+      "label": "Robot Client",
+      "ssh_host": "10.0.0.9",
+      "ssh_user": "robot",
+      "ssh_port": 22,
+      "ssh_identity_file": "./keys/client_id",
+      "workdir": "/home/robot/RealWorld-GR00T/realworld_deploy/robot_inference",
+      "shell": "bash -lc"
+    }
+  },
+  "inputs": {
+    "model_server_config_path": {
+      "_comment": "This path is interpreted on the remote `server` machine, not on the dashboard machine.",
+      "label": "Model Server Config Path",
+      "type": "path",
+      "required": true,
+      "target": "server"
+    },
+    "inference_client_config_path": {
+      "_comment": "This path is interpreted on the remote `client` machine.",
+      "label": "Inference Client Config Path",
+      "type": "path",
+      "required": true,
+      "target": "client"
+    }
+  },
+  "commands": {
+    "start_model_server": {
+      "_comment": "Must include {model_server_config_path}. Runs under targets.server.workdir.",
+      "label": "启动模型服务",
+      "target": "server",
+      "background": true,
+      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && uv run python inference_server_groot.py --config {model_server_config_path}",
+      "stdout_log": "/tmp/vlalab/start_model_server.stdout.log",
+      "stderr_log": "/tmp/vlalab/start_model_server.stderr.log"
+    },
+    "start_robot_server": {
+      "_comment": "Background commands should always provide both stdout_log and stderr_log.",
+      "label": "启动机器人服务",
+      "target": "client",
+      "background": true,
+      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate robot && python control/start_server.py",
+      "stdout_log": "/tmp/vlalab/start_robot_server.stdout.log",
+      "stderr_log": "/tmp/vlalab/start_robot_server.stderr.log"
+    },
+    "set_joint_preset": {
+      "_comment": "Foreground command. No log path needed because output is returned directly.",
+      "label": "设置关节位姿",
+      "target": "client",
+      "background": false,
+      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate robot && python control/set_joint_positions.py"
+    },
+    "start_inference_client": {
+      "_comment": "Must include {inference_client_config_path}.",
+      "label": "启动推理客户端",
+      "target": "client",
+      "background": true,
+      "template": "source /opt/miniconda3/etc/profile.d/conda.sh && conda activate robot && python inference_client.py --config {inference_client_config_path}",
+      "stdout_log": "/tmp/vlalab/start_inference_client.stdout.log",
+      "stderr_log": "/tmp/vlalab/start_inference_client.stderr.log"
+    }
+  }
+}

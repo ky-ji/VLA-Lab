@@ -126,6 +126,35 @@ def test_load_deploy_config_accepts_valid_dashboard(tmp_path):
     assert config.commands["set_joint_preset"].required_inputs == ()
 
 
+def test_load_deploy_config_accepts_explicit_ssh_settings(tmp_path):
+    payload = _base_config()
+    keys_dir = tmp_path / "keys"
+    keys_dir.mkdir()
+    (keys_dir / "robot_id").write_text("", encoding="utf-8")
+    (tmp_path / "ssh_config").write_text("", encoding="utf-8")
+    payload["targets"]["server"].update(
+        {
+            "ssh_host": "10.0.0.8",
+            "ssh_user": "deploy",
+            "ssh_port": 2222,
+            "ssh_identity_file": "keys/robot_id",
+            "ssh_config_file": "ssh_config",
+            "ssh_options": ["ProxyJump=bastion", "StrictHostKeyChecking=no"],
+        }
+    )
+    path = _write_config(tmp_path, payload)
+
+    config = ds.load_deploy_config(str(path))
+
+    target = config.targets["server"]
+    assert target.ssh_host == "10.0.0.8"
+    assert target.ssh_user == "deploy"
+    assert target.ssh_port == 2222
+    assert target.ssh_identity_file == str((keys_dir / "robot_id").resolve())
+    assert target.ssh_config_file == str((tmp_path / "ssh_config").resolve())
+    assert target.ssh_options == ("ProxyJump=bastion", "StrictHostKeyChecking=no")
+
+
 def test_load_deploy_config_rejects_missing_required_placeholder(tmp_path):
     payload = _base_config()
     payload["commands"]["start_model_server"]["template"] = "python server.py"
@@ -198,6 +227,57 @@ def test_build_deploy_overview_returns_fixed_sections(tmp_path, monkeypatch):
     assert "/remote/server.yaml" in command_map["start_model_server"].resolved_preview
     assert "/remote/client.yaml" in command_map["start_inference_client"].resolved_preview
     assert command_map["set_joint_preset"].resolved_preview.endswith("python control/set_joint_positions.py")
+
+
+def test_probe_target_builds_ssh_command_from_explicit_settings(tmp_path, monkeypatch):
+    payload = _base_config()
+    payload["targets"]["server"].update(
+        {
+            "ssh_host": "10.0.0.8",
+            "ssh_user": "deploy",
+            "ssh_port": 2222,
+            "ssh_identity_file": "keys/server_id",
+            "ssh_config_file": "ssh/config",
+            "ssh_options": ["ProxyJump=bastion", "StrictHostKeyChecking=no"],
+        }
+    )
+    (tmp_path / "keys").mkdir()
+    (tmp_path / "keys" / "server_id").write_text("", encoding="utf-8")
+    (tmp_path / "ssh").mkdir()
+    (tmp_path / "ssh" / "config").write_text("", encoding="utf-8")
+    controller = ds.DeployController(ds.load_deploy_config(str(_write_config(tmp_path, payload))))
+    captured = {}
+
+    def fake_run(command, capture_output, text, stdin, timeout, check):
+        captured["command"] = command
+        return subprocess.CompletedProcess(command, 0, "__vlalab_ok__\n", "")
+
+    monkeypatch.setattr(ds.subprocess, "run", fake_run)
+
+    try:
+        result = controller.probe_target("server")
+        assert result.connected is True
+        assert captured["command"] == [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=3",
+            "-F",
+            str((tmp_path / "ssh" / "config").resolve()),
+            "-i",
+            str((tmp_path / "keys" / "server_id").resolve()),
+            "-p",
+            "2222",
+            "-o",
+            "ProxyJump=bastion",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "deploy@10.0.0.8",
+            "echo __vlalab_ok__",
+        ]
+    finally:
+        controller.close()
 
 
 def test_submit_command_requires_missing_inputs(tmp_path):
@@ -325,8 +405,8 @@ def test_stop_background_job_sends_remote_kill(tmp_path, monkeypatch):
     controller = ds.DeployController(ds.load_deploy_config(str(_write_config(tmp_path))))
     calls = []
 
-    def fake_run_ssh_host(ssh_host, script, timeout=20.0):
-        calls.append((ssh_host, script))
+    def fake_run_ssh_host(target, script, timeout=20.0):
+        calls.append((target, script))
         return subprocess.CompletedProcess([], 0, "", "")
 
     monkeypatch.setattr(controller, "_run_ssh_host", fake_run_ssh_host)
@@ -357,7 +437,7 @@ def test_stop_background_job_sends_remote_kill(tmp_path, monkeypatch):
         stopped = controller.stop_job(job["id"])
         assert stopped.state == "stopping"
         assert calls
-        assert calls[0][0] == "groot-gpu"
+        assert calls[0][0].ssh_host == "groot-gpu"
         assert "kill -TERM" in calls[0][1]
         assert "4321" in calls[0][1]
     finally:

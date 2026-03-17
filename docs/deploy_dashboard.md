@@ -25,7 +25,22 @@ deploy 只读取一个 JSON 配置文件，优先级如下：
 3. 环境变量 `VLALAB_DEPLOY_CONFIG`
 4. 默认路径 `configs/deploy/dashboard.json`
 
-后端通过本机 `ssh <host_alias> ...` 连接目标机器，推荐提前在 `~/.ssh/config` 中配置好免交互 host alias。
+仓库里还提供了一个可直接参考的带说明示例：
+
+- `configs/deploy/dashboard.annotated.example.json`
+- 这是合法 JSON，不是 JSONC
+- 里面用 `_comment` 字段做说明，当前 loader 会忽略这些字段
+
+后端通过本机 `ssh ...` 连接目标机器。`ssh_host` 可以继续写成 host alias，但更推荐把连接信息直接写进 `dashboard.json`，避免依赖当前机器的 `~/.ssh/config`。
+
+可选的 SSH 字段如下：
+
+- `ssh_host`: host alias、hostname 或 IP
+- `ssh_user`: 可选，等价于 `ssh user@host`
+- `ssh_port`: 可选，等价于 `ssh -p`
+- `ssh_identity_file`: 可选，私钥路径；相对路径会相对 `dashboard.json` 解析
+- `ssh_config_file`: 可选，项目内 SSH config 路径；相对路径会相对 `dashboard.json` 解析
+- `ssh_options`: 可选，字符串列表，每项会展开成一个 `-o ...`
 
 最小配置结构如下：
 
@@ -101,6 +116,33 @@ deploy 只读取一个 JSON 配置文件，优先级如下：
 如果不配置，则继续使用原来的本地默认逻辑（`--run-dir` / `VLALAB_DIR` / 自动检测 `vlalab_runs`）。
 当前远端 runs 模式已支持列表、详情、replay、图片和删除；attention 相关生成仍然只支持本地 runs。
 
+如果不希望依赖运行机器的 `~/.ssh/config`，可以改成下面这种显式写法：
+
+```json
+{
+  "targets": {
+    "server": {
+      "label": "Model Server",
+      "ssh_host": "10.0.0.8",
+      "ssh_user": "deploy",
+      "ssh_port": 2222,
+      "ssh_identity_file": "./keys/server_id",
+      "ssh_options": ["ProxyJump=bastion", "StrictHostKeyChecking=no"],
+      "workdir": "/path/to/realworld_deploy/server",
+      "shell": "bash -lc"
+    },
+    "client": {
+      "label": "Robot Client",
+      "ssh_host": "10.0.0.9",
+      "ssh_user": "robot",
+      "ssh_identity_file": "./keys/client_id",
+      "workdir": "/path/to/realworld_deploy/robot_inference",
+      "shell": "bash -lc"
+    }
+  }
+}
+```
+
 ## 配置约束
 
 - `runs_dir` 可选；如果提供，必须是 `server` 机器上的路径字符串
@@ -115,7 +157,7 @@ deploy 只读取一个 JSON 配置文件，优先级如下：
 
 ## 执行模型
 
-- 健康检查：`ssh <host_alias> "echo __vlalab_ok__"`
+- 健康检查：按 target 配置拼出 `ssh ... "echo __vlalab_ok__"`
 - 后台任务：远端 `nohup ... & echo $!`，记录 PID
 - 前台任务：同步执行并回写 stdout/stderr
 - 后端会把 job 状态持久化到配置文件旁边的 `.deploy_state/`
@@ -154,7 +196,7 @@ vlalab serve --no-frontend --deploy-config configs/deploy/dashboard.json
 
 ## 建议使用方式
 
-1. 先确认 dashboard 主机能无密码 SSH 到 `server` 和 `client`
+1. 先确认 dashboard 主机能用 `dashboard.json` 里的 SSH 参数连通 `server` 和 `client`
 2. 按实际环境修改 `configs/deploy/dashboard.json`
 3. 把两条 `config_path` 的值填写为目标机器上的远端路径
 4. 通过 `/deploy` 页面直接启动 realworld deploy 流程
