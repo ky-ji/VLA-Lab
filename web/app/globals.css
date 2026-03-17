@@ -1733,7 +1733,6 @@ code.inline-code {
 .deploy-target-grid,
 .deploy-notes,
 .deploy-detail-grid,
-.deploy-workflow-grid,
 .deploy-path-list,
 .deploy-process-list {
   display: grid;
@@ -1775,14 +1774,6 @@ code.inline-code {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
-.deploy-workflow-grid {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  max-height: 76vh;
-  overflow-y: auto;
-  align-content: start;
-  padding-right: 6px;
-}
-
 .deploy-target-card {
   display: grid;
   gap: 16px;
@@ -1792,33 +1783,6 @@ code.inline-code {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 250, 241, 0.76)),
     radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 28%);
-}
-
-.deploy-workflow-card {
-  display: grid;
-  gap: 14px;
-  padding: 22px;
-  min-height: 620px;
-  max-height: 620px;
-  grid-template-rows: auto minmax(0, 1fr);
-  border-radius: 22px;
-  border: 1px solid rgba(31, 41, 51, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(240, 253, 250, 0.76)),
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 32%);
-  overflow: hidden;
-}
-
-.deploy-workflow-top {
-  display: grid;
-  gap: 12px;
-  align-content: start;
-}
-
-.deploy-workflow-card h3 {
-  margin: 0;
-  font-family: "Space Grotesk", "Avenir Next", sans-serif;
-  letter-spacing: -0.03em;
 }
 
 .deploy-target-header,
@@ -2022,61 +1986,171 @@ code.inline-code {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
-/* 合并后的命令+任务卡片布局 */
+/* ── 合并卡片：Command + Job ── */
 .deploy-command-job-grid {
   display: grid;
-  gap: 20px;
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  gap: 14px;
 }
 
-.deploy-command-job-card {
+.cj-card {
   display: grid;
-  gap: 14px;
-  padding: 22px;
-  min-height: 480px;
-  max-height: 620px;
-  grid-template-rows: auto minmax(0, 1fr);
-  border-radius: 22px;
+  gap: 10px;
+  padding: 18px 22px;
+  border-radius: 18px;
   border: 1px solid rgba(31, 41, 51, 0.08);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(240, 253, 250, 0.76)),
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 32%);
-  overflow: hidden;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 252, 250, 0.82)),
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.1), transparent 40%);
+  transition: box-shadow 0.2s ease;
 }
 
-.deploy-command-job-head {
-  display: grid;
+.cj-card:hover {
+  box-shadow: 0 2px 12px rgba(15, 118, 110, 0.08);
+}
+
+.cj-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 12px;
-  align-content: start;
+  flex-wrap: wrap;
 }
 
-.deploy-command-job-body {
-  display: grid;
-  grid-template-columns: 1fr minmax(200px, 0.6fr);
-  gap: 20px;
-  align-items: start;
-}
-
-.deploy-command-job-left {
-  display: grid;
+.cj-title {
+  display: flex;
+  align-items: center;
   gap: 10px;
   min-width: 0;
 }
 
-.deploy-command-job-right {
-  display: grid;
-  gap: 10px;
-  align-content: start;
+.cj-title h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-family: "Space Grotesk", "Avenir Next", sans-serif;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
 }
 
-.deploy-command-job-right .deploy-job-meta {
-  display: grid;
+.cj-target-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(31, 41, 51, 0.06);
+}
+
+.cj-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cj-actions {
+  display: flex;
   gap: 6px;
 }
 
-.deploy-summary {
-  font-size: 0.86rem;
-  margin: 0;
+.cj-info-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(31, 41, 51, 0.03);
+  font-size: 0.84rem;
+  flex-wrap: wrap;
+  color: var(--ink);
+}
+
+.cj-info-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.cj-info-label {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cj-info-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(31, 41, 51, 0.12);
+  flex-shrink: 0;
+}
+
+.cj-expand-btn {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--brand-strong);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.cj-expand-btn:hover {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.cj-error-bar {
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(185, 28, 28, 0.08);
+  color: #991b1b;
+  font-size: 0.84rem;
+}
+
+.cj-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.cj-logs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+
+.cj-log-col {
+  display: grid;
+  gap: 4px;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: 220px;
+  min-height: 0;
+}
+
+.cj-log-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  padding-left: 2px;
+}
+
+.cj-log-empty {
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(31, 41, 51, 0.03);
+  color: var(--ink-soft);
+  font-size: 0.84rem;
 }
 
 .deploy-command-meta,
@@ -2158,33 +2232,6 @@ code.inline-code {
   background: #450a0a;
 }
 
-.deploy-log-stack {
-  display: grid;
-  gap: 12px;
-  min-height: 0;
-  grid-template-rows: minmax(0, 1.65fr) minmax(0, 1fr);
-}
-
-.deploy-log-panel {
-  display: grid;
-  gap: 8px;
-  min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
-}
-
-.deploy-log-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.deploy-log-empty {
-  min-height: 0;
-  height: 100%;
-  display: flex;
-  align-items: center;
-}
 
 .deploy-note-card.is-standalone strong {
   font-family: "Space Grotesk", "Avenir Next", sans-serif;
@@ -2214,20 +2261,20 @@ code.inline-code {
   .deploy-notes,
   .deploy-detail-grid,
   .deploy-runbook-grid,
-  .deploy-workflow-grid,
-  .deploy-command-job-grid,
   .deploy-path-list,
   .deploy-process-list {
     grid-template-columns: 1fr;
   }
 
-  .deploy-command-job-body {
+  .cj-logs {
     grid-template-columns: 1fr;
   }
-}
 
-@media (max-width: 560px) {
-  .deploy-command-job-grid {
-    grid-template-columns: 1fr;
+  .cj-header {
+    gap: 8px;
+  }
+
+  .cj-info-strip {
+    gap: 8px;
   }
 }

@@ -170,9 +170,6 @@ function InputField({ spec, value, history, onChange, onCommit }) {
   );
 }
 
-/**
- * 合并后的命令+任务卡片：每个命令与其对应 job 一一对应，提高视觉效率
- */
 function CommandJobCard({
   command,
   target,
@@ -184,157 +181,99 @@ function CommandJobCard({
   onRun,
   onStop,
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   const isDisconnected = !target?.connected;
   const isRunning = busy;
   let state = "ready";
-  let summary = "Ready to run";
 
   if (isRunning) {
     state = activeJob?.state || "running";
-    summary =
-      activeJob?.state === "stopping"
-        ? "Stopping current job"
-        : activeJob?.id
-          ? `Job ${activeJob.id} is in progress`
-          : "A job for this command is already running";
   } else if (isDisconnected) {
     state = "disconnected";
-    summary = target?.last_error || "SSH target is not reachable";
   } else if (missingInputs.length) {
     state = "queued";
-    summary = `Missing inputs: ${missingInputs.map((item) => prettyKey(item)).join(", ")}`;
   } else if (job?.state) {
     state = job.state;
-    summary = job.error || `Job ${job.id || ""} · PID ${job.remote_pid || "--"}`;
   }
 
-  const stdoutPath = job?.stdout_log || (command.background ? "等待命令首次运行后生成" : "--");
-  const stderrPath = job?.stderr_log || (command.background ? "等待命令首次运行后生成" : "--");
   const hasLogs = Boolean(job?.last_stdout || job?.last_stderr);
+  const stoppableJob = activeJob?.stoppable ? activeJob : job?.stoppable ? job : null;
+  const autoExpand = hasLogs || isRunning;
 
   return (
-    <article className="deploy-command-job-card">
-      <div className="deploy-command-job-head">
-        <div className="deploy-target-header">
-          <div>
-            <p className="eyebrow">{target?.label || command.target_id}</p>
-            <h3>{command.label}</h3>
-          </div>
-          <span className={`deploy-status-chip ${stateToneClass(state)}`}>{prettyState(state)}</span>
+    <article className={`cj-card ${(expanded || autoExpand) ? "is-expanded" : ""}`}>
+      <div className="cj-header">
+        <div className="cj-title">
+          <span className="cj-target-badge">{target?.label || command.target_id}</span>
+          <h3>{command.label}</h3>
         </div>
-
-        <div className="deploy-command-job-body">
-          <div className="deploy-command-job-left">
-            <pre className="deploy-command-block is-compact">{command.resolved_preview || "No preview available"}</pre>
-            <div className="deploy-command-meta">
-              <div>
-                <span className="stat-label">Mode</span>
-                <code>{command.background ? "background" : "foreground"}</code>
-              </div>
-              <div>
-                <span className="stat-label">Inputs</span>
-                <code>{command.required_inputs?.length ? command.required_inputs.join(", ") : "--"}</code>
-              </div>
-              <div>
-                <span className="stat-label">Target</span>
-                <code>{command.target_id}</code>
-              </div>
-            </div>
-            {missingInputs.length ? (
-              <div className="deploy-manual-hint">缺少参数: {missingInputs.map((item) => prettyKey(item)).join(", ")}</div>
-            ) : null}
-            <p className="muted deploy-summary">{summary}</p>
-            <div className="deploy-action-row">
+        <div className="cj-header-right">
+          <span className={`deploy-status-chip ${stateToneClass(state)}`}>{prettyState(state)}</span>
+          <div className="cj-actions">
+            <button
+              type="button"
+              className="deploy-action-button is-primary"
+              onClick={() => onRun(command.id)}
+              disabled={isDisconnected || missingInputs.length > 0 || isRunning}
+            >
+              {isRunning ? "执行中..." : "运行"}
+            </button>
+            {stoppableJob ? (
               <button
                 type="button"
-                className="deploy-action-button is-primary"
-                onClick={() => onRun(command.id)}
-                disabled={isDisconnected || missingInputs.length > 0 || isRunning}
+                className="deploy-action-button is-danger"
+                onClick={() => onStop(stoppableJob.id)}
+                disabled={stopping}
               >
-                运行命令
+                {stopping ? "停止中..." : "停止"}
               </button>
-              {activeJob?.stoppable ? (
-                <button
-                  type="button"
-                  className="deploy-action-button is-danger"
-                  onClick={() => onStop(activeJob.id)}
-                  disabled={stopping}
-                >
-                  {stopping ? "停止中..." : "停止命令"}
-                </button>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="deploy-command-job-right">
-            <div className="deploy-job-meta">
-              <div className="deploy-meta-row">
-                <span className="stat-label">Job ID</span>
-                <code>{job?.id || "--"}</code>
-              </div>
-              <div className="deploy-meta-row">
-                <span className="stat-label">Remote PID</span>
-                <span>{job?.remote_pid || "--"}</span>
-              </div>
-              <div className="deploy-meta-row">
-                <span className="stat-label">Submitted</span>
-                <span>{formatTime(job?.submitted_at)}</span>
-              </div>
-              <div className="deploy-meta-row">
-                <span className="stat-label">Started</span>
-                <span>{formatTime(job?.started_at)}</span>
-              </div>
-              <div className="deploy-meta-row">
-                <span className="stat-label">Finished</span>
-                <span>{formatTime(job?.finished_at)}</span>
-              </div>
-              {job?.error ? (
-                <div className="deploy-meta-row is-error">
-                  <span className="stat-label">Error</span>
-                  <span>{job.error}</span>
-                </div>
-              ) : null}
-            </div>
-            <div className="deploy-command-meta">
-              <div>
-                <span className="stat-label">stdout</span>
-                <code>{stdoutPath}</code>
-              </div>
-              <div>
-                <span className="stat-label">stderr</span>
-                <code>{stderrPath}</code>
-              </div>
-            </div>
+            ) : null}
           </div>
         </div>
       </div>
 
-      <div className="deploy-log-stack">
-        <div className="deploy-log-panel is-stdout">
-          <div className="deploy-log-header">
-            <span className="stat-label">stdout · 最近一次执行</span>
-          </div>
-          {job?.last_stdout ? (
-            <pre className="deploy-command-block is-output is-scrollable">{job.last_stdout}</pre>
-          ) : (
-            <div className="empty-panel deploy-empty-panel deploy-log-empty">
-              {hasLogs ? "stdout 暂无输出" : "还没有这条命令的 stdout 记录"}
-            </div>
-          )}
-        </div>
-        <div className="deploy-log-panel is-stderr">
-          <div className="deploy-log-header">
-            <span className="stat-label">stderr · 最近一次执行</span>
-          </div>
-          {job?.last_stderr ? (
-            <pre className="deploy-command-block is-output is-error is-scrollable">{job.last_stderr}</pre>
-          ) : (
-            <div className="empty-panel deploy-empty-panel deploy-log-empty">
-              {hasLogs ? "stderr 暂无输出" : "还没有这条命令的 stderr 记录"}
-            </div>
-          )}
-        </div>
+      <div className="cj-info-strip">
+        <span className="cj-info-item"><span className="cj-info-label">PID</span>{job?.remote_pid || "--"}</span>
+        <span className="cj-info-sep" />
+        <span className="cj-info-item"><span className="cj-info-label">Mode</span>{command.background ? "后台" : "前台"}</span>
+        <span className="cj-info-sep" />
+        <span className="cj-info-item"><span className="cj-info-label">Started</span>{formatTime(job?.started_at)}</span>
+        <span className="cj-info-sep" />
+        <span className="cj-info-item"><span className="cj-info-label">Finished</span>{formatTime(job?.finished_at)}</span>
+        <button type="button" className="cj-expand-btn" onClick={() => setExpanded((v) => !v)}>
+          {(expanded || autoExpand) ? "收起详情" : "展开详情"}
+        </button>
       </div>
+
+      {missingInputs.length ? (
+        <div className="deploy-manual-hint">缺少参数: {missingInputs.map((item) => prettyKey(item)).join(", ")}</div>
+      ) : null}
+      {job?.error ? <div className="cj-error-bar">{job.error}</div> : null}
+
+      {(expanded || autoExpand) ? (
+        <div className="cj-detail">
+          <pre className="deploy-command-block is-compact">{command.resolved_preview || "--"}</pre>
+          <div className="cj-logs">
+            <div className="cj-log-col">
+              <span className="cj-log-label">stdout</span>
+              {job?.last_stdout ? (
+                <pre className="deploy-command-block is-output is-scrollable">{job.last_stdout}</pre>
+              ) : (
+                <div className="cj-log-empty">{hasLogs ? "暂无输出" : "无记录"}</div>
+              )}
+            </div>
+            <div className="cj-log-col">
+              <span className="cj-log-label">stderr</span>
+              {job?.last_stderr ? (
+                <pre className="deploy-command-block is-output is-error is-scrollable">{job.last_stderr}</pre>
+              ) : (
+                <div className="cj-log-empty">{hasLogs ? "暂无输出" : "无记录"}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
