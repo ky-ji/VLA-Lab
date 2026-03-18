@@ -14,7 +14,13 @@ from .service import stat_signature
 
 @lru_cache(maxsize=16)
 def _open_zarr_cached(path_str: str, mtime_ns: int, size: int):
-    import zarr
+    try:
+        import zarr
+    except ImportError:
+        raise ImportError(
+            "zarr is required for dataset inspection. "
+            "Install it with: pip install vlalab[full]"
+        ) from None
 
     return zarr.open(path_str, mode="r")
 
@@ -68,7 +74,8 @@ def _episode_slice(episode_ends: np.ndarray, episode_idx: int) -> slice:
 
 
 def _safe_series(values: np.ndarray) -> List[float]:
-    return [float(v) for v in np.asarray(values).tolist()]
+    arr = np.asarray(values, dtype=np.float64).ravel()
+    return arr.tolist()
 
 
 def load_dataset_episode_view(
@@ -96,29 +103,23 @@ def load_dataset_episode_view(
     step_idx = max(0, min(int(step_idx), total_steps - 1))
     image_keys, lowdim_keys = _classify_keys(root)
 
+    frame_indices = list(range(0, total_steps, max(1, step_interval)))[:max_frames]
+
+    # Batch-load image data per key: one Zarr read for the whole episode slice,
+    # then index in-memory for both step_images and image_grids.
     step_images = {}
+    image_grids = {}
     for key in image_keys:
-        raw = data[key][episode_slice][step_idx]
-        step_images[key] = image_to_data_url(raw)
+        episode_images = data[key][episode_slice]
+        step_images[key] = image_to_data_url(episode_images[step_idx])
+        image_grids[key] = [
+            {"step_idx": int(fi), "data_url": image_to_data_url(episode_images[fi])}
+            for fi in frame_indices
+        ]
 
     lowdim_step = {}
     for key in lowdim_keys:
-        value = np.asarray(data[key][episode_slice][step_idx]).tolist()
-        lowdim_step[key] = value
-
-    frame_indices = list(range(0, total_steps, max(1, step_interval)))[:max_frames]
-    image_grids = {}
-    for key in image_keys:
-        grid = []
-        episode_images = data[key][episode_slice]
-        for frame_idx in frame_indices:
-            grid.append(
-                {
-                    "step_idx": int(frame_idx),
-                    "data_url": image_to_data_url(episode_images[frame_idx]),
-                }
-            )
-        image_grids[key] = grid
+        lowdim_step[key] = np.asarray(data[key][episode_slice.start + step_idx]).tolist()
 
     action_dim = actions.shape[1] if actions.ndim > 1 else 1
     action_labels = [f"dim_{idx}" for idx in range(action_dim)]

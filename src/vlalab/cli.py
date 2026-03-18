@@ -16,7 +16,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
 
 import click
 from rich.console import Console
@@ -155,7 +155,7 @@ def _wait_for_port_release(port: int, attempts: int = 10, delay_s: float = 0.5) 
     return not _is_port_in_use(port)
 
 
-def _find_available_port(start_port: int, reserved_ports: Optional[set[int]] = None, limit: int = 50) -> Optional[int]:
+def _find_available_port(start_port: int, reserved_ports: Optional[Set[int]] = None, limit: int = 50) -> Optional[int]:
     """Find the next available port, skipping any reserved ports."""
     reserved = reserved_ports or set()
     for candidate in range(start_port, start_port + limit):
@@ -170,7 +170,7 @@ def _resolve_launch_port(
     port: int,
     purpose: str,
     option_flag: str,
-    reserved_ports: Optional[set[int]] = None,
+    reserved_ports: Optional[Set[int]] = None,
 ) -> int:
     """Resolve the port to use for a service, preferring the requested port when possible."""
     reserved = reserved_ports or set()
@@ -553,6 +553,117 @@ def info(run_dir: str):
         console.print(table)
     except Exception as exc:
         console.print(f"[red]Error loading run: {exc}[/red]")
+
+
+@main.command()
+def doctor():
+    """Check VLA-Lab installation and diagnose common issues."""
+    import platform
+
+    import vlalab
+
+    console.print(f"\n[bold cyan]VLA-Lab Doctor[/bold cyan]")
+    console.print(f"{'─' * 50}")
+
+    # System info
+    console.print(f"\n[bold]System[/bold]")
+    console.print(f"  Python:   {platform.python_version()}")
+    console.print(f"  Platform: {platform.system()} {platform.machine()}")
+    console.print(f"  VLA-Lab:  {vlalab.__version__}")
+
+    # Core dependencies
+    console.print(f"\n[bold]Core Dependencies[/bold]")
+    core_deps = {
+        "numpy": "numpy",
+        "matplotlib": "matplotlib",
+        "pydantic": "pydantic",
+        "fastapi": "fastapi",
+        "uvicorn": "uvicorn",
+        "cv2": "opencv-python-headless",
+        "click": "click",
+        "rich": "rich",
+        "plotly": "plotly",
+    }
+    issues = []
+    for mod_name, pkg_name in core_deps.items():
+        try:
+            mod = __import__(mod_name)
+            ver = getattr(mod, "__version__", "unknown")
+            console.print(f"  [green]✓[/green] {pkg_name:30s} {ver}")
+        except ImportError:
+            console.print(f"  [red]✗[/red] {pkg_name:30s} NOT INSTALLED")
+            issues.append(f"pip install {pkg_name}")
+
+    # Optional dependencies
+    console.print(f"\n[bold]Optional Dependencies[/bold]")
+    optional_deps = {
+        "zarr": ("zarr", "pip install vlalab[full]"),
+        "scipy": ("scipy", "pip install vlalab[full]"),
+        "PIL": ("pillow", "pip install vlalab[full]"),
+        "torch": ("pytorch", "See https://pytorch.org/get-started"),
+        "tqdm": ("tqdm", "pip install tqdm"),
+    }
+    for mod_name, (pkg_name, install_hint) in optional_deps.items():
+        try:
+            mod = __import__(mod_name)
+            ver = getattr(mod, "__version__", "unknown")
+            console.print(f"  [green]✓[/green] {pkg_name:30s} {ver}")
+        except ImportError:
+            console.print(f"  [dim]○[/dim] {pkg_name:30s} not installed ({install_hint})")
+
+    # GPU / CUDA
+    console.print(f"\n[bold]GPU / CUDA[/bold]")
+    try:
+        import torch
+        if torch.cuda.is_available():
+            console.print(f"  [green]✓[/green] CUDA available: {torch.cuda.get_device_name(0)}")
+            console.print(f"  [green]✓[/green] CUDA version:   {torch.version.cuda}")
+        else:
+            console.print(f"  [yellow]○[/yellow] CUDA not available (CPU-only mode)")
+    except ImportError:
+        console.print(f"  [dim]○[/dim] PyTorch not installed, GPU check skipped")
+
+    # Web frontend
+    console.print(f"\n[bold]Web Frontend (Next.js)[/bold]")
+    try:
+        web_dir = _resolve_web_dir()
+        console.print(f"  [green]✓[/green] web/ directory found: {web_dir}")
+        if (web_dir / "node_modules").exists():
+            console.print(f"  [green]✓[/green] node_modules/ exists")
+        else:
+            console.print(f"  [yellow]○[/yellow] node_modules/ missing — run: cd web && npm install")
+        node_result = subprocess.run(
+            ["node", "--version"], capture_output=True, text=True
+        )
+        if node_result.returncode == 0:
+            console.print(f"  [green]✓[/green] Node.js: {node_result.stdout.strip()}")
+        else:
+            console.print(f"  [red]✗[/red] Node.js not found")
+            issues.append("Install Node.js: https://nodejs.org/")
+    except FileNotFoundError:
+        console.print(f"  [dim]○[/dim] web/ directory not found (OK if installed via pip)")
+
+    # Runs directory
+    console.print(f"\n[bold]Runs Directory[/bold]")
+    env_dir = os.environ.get("VLALAB_DIR")
+    if env_dir:
+        console.print(f"  VLALAB_DIR = {env_dir}")
+        if Path(env_dir).exists():
+            console.print(f"  [green]✓[/green] Directory exists")
+        else:
+            console.print(f"  [yellow]○[/yellow] Directory does not exist yet (will be created on first run)")
+    else:
+        console.print(f"  VLALAB_DIR not set (will use auto-detection)")
+
+    # Summary
+    console.print(f"\n{'─' * 50}")
+    if issues:
+        console.print(f"[yellow]Found {len(issues)} issue(s) to fix:[/yellow]")
+        for fix in issues:
+            console.print(f"  → {fix}")
+    else:
+        console.print(f"[green]All checks passed! VLA-Lab is ready to use.[/green]")
+    console.print()
 
 
 if __name__ == "__main__":

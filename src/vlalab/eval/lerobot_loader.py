@@ -6,6 +6,7 @@ DatasetLoader interface, enabling open-loop evaluation of GR00T models
 through VLA-Lab's unified evaluation pipeline.
 """
 
+from collections import OrderedDict
 from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
@@ -13,6 +14,8 @@ import numpy as np
 import pandas as pd
 
 from vlalab.eval.open_loop_eval import DatasetLoader
+
+_MAX_EPISODE_CACHE = 32
 
 
 class LeRobotDatasetLoader(DatasetLoader):
@@ -44,6 +47,7 @@ class LeRobotDatasetLoader(DatasetLoader):
         modality_configs: GR00T-style modality configuration dict
         embodiment_tag: EmbodimentTag for data extraction
         video_backend: Video decoding backend (default: "torchcodec")
+        max_cache_episodes: Max number of episodes to keep in LRU cache
     """
 
     def __init__(
@@ -52,14 +56,21 @@ class LeRobotDatasetLoader(DatasetLoader):
         modality_configs: Dict[str, Any],
         embodiment_tag: Any,
         video_backend: str = "torchcodec",
+        max_cache_episodes: int = _MAX_EPISODE_CACHE,
     ):
-        from gr00t.data.dataset.lerobot_episode_loader import LeRobotEpisodeLoader
+        try:
+            from gr00t.data.dataset.lerobot_episode_loader import LeRobotEpisodeLoader
+        except ImportError:
+            raise ImportError(
+                "Isaac-GR00T is required for LeRobotDatasetLoader. "
+                "Install it following: https://github.com/NVIDIA/Isaac-GR00T"
+            ) from None
 
         self.dataset_path = dataset_path
         self.modality_configs = modality_configs
         self.embodiment_tag = embodiment_tag
+        self._max_cache = max_cache_episodes
 
-        # Initialize Isaac-GR00T's episode loader
         self.loader = LeRobotEpisodeLoader(
             dataset_path=dataset_path,
             modality_configs=modality_configs,
@@ -67,14 +78,22 @@ class LeRobotDatasetLoader(DatasetLoader):
             video_backend_kwargs=None,
         )
 
-        # Cache loaded episodes
-        self._episode_cache: Dict[int, pd.DataFrame] = {}
+        self._episode_cache: OrderedDict[int, pd.DataFrame] = OrderedDict()
+
+        # Pre-build observation-only modality config (avoids deepcopy per step)
+        self._obs_modality_configs = deepcopy(modality_configs)
+        self._obs_modality_configs.pop("action", None)
 
     def _get_episode(self, traj_id: int) -> pd.DataFrame:
-        """Load and cache an episode DataFrame."""
-        if traj_id not in self._episode_cache:
-            self._episode_cache[traj_id] = self.loader[traj_id]
-        return self._episode_cache[traj_id]
+        """Load and cache an episode DataFrame with LRU eviction."""
+        if traj_id in self._episode_cache:
+            self._episode_cache.move_to_end(traj_id)
+            return self._episode_cache[traj_id]
+        episode = self.loader[traj_id]
+        self._episode_cache[traj_id] = episode
+        while len(self._episode_cache) > self._max_cache:
+            self._episode_cache.popitem(last=False)
+        return episode
 
     def __len__(self) -> int:
         return len(self.loader)
@@ -98,29 +117,23 @@ class LeRobotDatasetLoader(DatasetLoader):
             - "state": Dict[str, np.ndarray] - state vectors by key
             - "images": Dict[str, np.ndarray] - images by camera name
         """
-        from gr00t.data.dataset.sharded_single_step_dataset import extract_step_data
+        from gr00t.data.dataset.sharded_single_step_dataset import extract_step_data  # noqa: F811
 
         episode = self._get_episode(traj_id)
-
-        # Build modality config without action (observation only)
-        obs_modality_configs = deepcopy(self.modality_configs)
-        obs_modality_configs.pop("action", None)
 
         step_data = extract_step_data(
             episode,
             step_idx,
-            obs_modality_configs,
+            self._obs_modality_configs,
             self.embodiment_tag,
             allow_padding=True,
         )
 
         obs = {"state": {}, "images": {}}
 
-        # Extract state data
         for key, value in step_data.states.items():
             obs["state"][key] = value
 
-        # Extract image data
         for key, value in step_data.images.items():
             obs["images"][key] = np.array(value)
 
@@ -165,18 +178,17 @@ class LeRobotDatasetLoader(DatasetLoader):
         episode = self._get_episode(traj_id)
         end = min(max_steps, len(episode)) if max_steps else len(episode)
 
-        all_actions = []
-        for step_idx in range(end):
-            action_parts = []
-            for key in action_keys:
-                col_name = f"action.{key}"
-                if col_name in episode.columns:
-                    arr = np.array(episode[col_name].iloc[step_idx]).astype(np.float32)
-                    arr = np.atleast_1d(arr)
-                    action_parts.append(arr)
-            all_actions.append(np.concatenate(action_parts, axis=0))
+        parts = []
+        for key in action_keys:
+            col_name = f"action.{key}"
+            if col_name in episode.columns:
+                col_data = episode[col_name].iloc[:end]
+                arr = np.stack([np.atleast_1d(np.asarray(v, dtype=np.float32)) for v in col_data])
+                parts.append(arr)
 
-        return np.array(all_actions)
+        if not parts:
+            return np.empty((end, 0), dtype=np.float32)
+        return np.concatenate(parts, axis=1)
 
     def get_task_description(self, traj_id: int) -> Optional[str]:
         """
@@ -187,13 +199,11 @@ class LeRobotDatasetLoader(DatasetLoader):
         """
         episode = self._get_episode(traj_id)
 
-        # Try to find language key
         language_config = self.modality_configs.get("language")
         if language_config is not None:
             lang_keys = getattr(language_config, "modality_keys", [])
             for key in lang_keys:
-                col_name = key  # language keys are stored directly
-                if col_name in episode.columns:
-                    return str(episode[col_name].iloc[0])
+                if key in episode.columns:
+                    return str(episode[key].iloc[0])
 
         return None

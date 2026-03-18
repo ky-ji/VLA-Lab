@@ -129,7 +129,13 @@ class ZarrDatasetLoader(DatasetLoader):
     """
     
     def __init__(self, zarr_path: str):
-        import zarr
+        try:
+            import zarr
+        except ImportError:
+            raise ImportError(
+                "zarr is required for ZarrDatasetLoader. "
+                "Install it with: pip install vlalab[full]"
+            ) from None
         self.zarr_path = Path(zarr_path)
         self.root = zarr.open(str(zarr_path), mode='r')
         self.data = self.root['data']
@@ -230,10 +236,16 @@ def evaluate_trajectory(
     
     logging.info(f"Evaluating trajectory {traj_id}: {actual_steps} steps")
     
-    # Collect predicted actions
     pred_actions_list = []
     
-    for step_idx in range(0, actual_steps, action_horizon):
+    step_range = range(0, actual_steps, action_horizon)
+    try:
+        from tqdm import tqdm
+        step_iter = tqdm(step_range, desc=f"Traj {traj_id}", unit="step", leave=False)
+    except ImportError:
+        step_iter = step_range
+
+    for step_idx in step_iter:
         logging.debug(f"Inferencing at step {step_idx}")
         
         # Get observation
@@ -479,16 +491,20 @@ class OpenLoopEvaluator:
         results = []
         all_mse = []
         all_mae = []
-        
-        for traj_id in traj_ids:
+
+        try:
+            from tqdm import tqdm
+            traj_iter = tqdm(traj_ids, desc="Evaluating trajectories", unit="traj")
+        except ImportError:
+            traj_iter = traj_ids
+
+        for traj_id in traj_iter:
             if traj_id >= len(self.dataset):
                 logging.warning(f"Trajectory {traj_id} out of range, skipping")
                 continue
             
-            # Reset policy state
             self.policy.reset()
             
-            # Evaluate
             result = evaluate_trajectory(
                 self.policy,
                 self.dataset,

@@ -41,8 +41,14 @@ class AVAlohaDatasetLoader(DatasetLoader):
         dataset_root: str,
         episodes: Optional[List[int]] = None,
     ):
-        from gym_av_aloha.common.replay_buffer import ReplayBuffer
-        from gym_av_aloha.datasets.av_aloha_dataset import AVAlohaDatasetMeta
+        try:
+            from gym_av_aloha.common.replay_buffer import ReplayBuffer
+            from gym_av_aloha.datasets.av_aloha_dataset import AVAlohaDatasetMeta
+        except ImportError:
+            raise ImportError(
+                "gym_av_aloha is required for AVAlohaDatasetLoader. "
+                "Install it following the RealWorld-VITA setup instructions."
+            ) from None
 
         self.root = Path(dataset_root)
         self.meta = AVAlohaDatasetMeta(root=self.root)

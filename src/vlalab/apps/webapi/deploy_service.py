@@ -460,12 +460,29 @@ class DeployController:
                 for job_id, payload in self._jobs.items()
                 if payload.get("_background") and str(payload.get("state")) in {"running", "stopping"}
             ]
-        for job_id in job_ids:
-            self._refresh_background_job(job_id)
+        if not job_ids:
+            return
+        if len(job_ids) == 1:
+            self._refresh_background_job(job_ids[0])
+        else:
+            futures = [self._executor.submit(self._refresh_background_job, jid) for jid in job_ids]
+            for f in futures:
+                try:
+                    f.result(timeout=20.0)
+                except Exception:
+                    pass
+
+    def _has_active_background_jobs(self) -> bool:
+        with self._lock:
+            return any(
+                payload.get("_background") and str(payload.get("state")) in {"running", "stopping"}
+                for payload in self._jobs.values()
+            )
 
     def _monitor_loop(self) -> None:
         while not self._stop_event.wait(3.0):
-            self.refresh_jobs()
+            if self._has_active_background_jobs():
+                self.refresh_jobs()
 
     def _ssh_destination(self, target: TargetConfig) -> str:
         if target.ssh_user:
@@ -1030,14 +1047,63 @@ class DeployController:
         if target is None or remote_pid in {None, ""}:
             return
 
-        stdout_text = self._read_remote_file_tail(target, job.get("stdout_log"), lines=60)
-        stderr_text = self._read_remote_file_tail(target, job.get("stderr_log"), lines=60)
+        # Single SSH call to collect stdout tail, stderr tail, pid alive check,
+        # and status file — replaces 3-4 separate SSH round trips.
+        stdout_path = job.get("stdout_log") or ""
+        stderr_path = job.get("stderr_log") or ""
+        status_path = job.get("_status_path") or ""
+        pid = int(remote_pid)
 
-        alive = False
+        parts = [f"echo '---STDOUT---'"]
+        if stdout_path:
+            parts.append(f"[ -f {shlex.quote(stdout_path)} ] && tail -n 60 {shlex.quote(stdout_path)} || true")
+        parts.append(f"echo '---STDERR---'")
+        if stderr_path:
+            parts.append(f"[ -f {shlex.quote(stderr_path)} ] && tail -n 60 {shlex.quote(stderr_path)} || true")
+        parts.append(f"echo '---PID---'")
+        parts.append(f"kill -0 {pid} >/dev/null 2>&1 && echo ALIVE || echo DEAD")
+        parts.append(f"echo '---STATUS---'")
+        if status_path:
+            parts.append(f"[ -f {shlex.quote(status_path)} ] && cat {shlex.quote(status_path)} || true")
+
+        combined_script = "\n".join(parts)
         try:
-            alive = self._is_remote_pid_alive(target, int(remote_pid))
+            result = self._run_ssh_host(target, combined_script, timeout=15.0)
         except Exception:
-            alive = False
+            return
+
+        raw = result.stdout or ""
+        stdout_text = ""
+        stderr_text = ""
+        alive = False
+        exit_code = None
+        finished_at = None
+
+        # Parse combined output by sentinel markers
+        sections = {}
+        current_section = None
+        current_lines: list = []
+        for line in raw.splitlines():
+            if line.strip() in ("---STDOUT---", "---STDERR---", "---PID---", "---STATUS---"):
+                if current_section is not None:
+                    sections[current_section] = "\n".join(current_lines)
+                current_section = line.strip().strip("-")
+                current_lines = []
+            else:
+                current_lines.append(line)
+        if current_section is not None:
+            sections[current_section] = "\n".join(current_lines)
+
+        stdout_text = _trim_output(sections.get("STDOUT", ""))
+        stderr_text = _trim_output(sections.get("STDERR", ""))
+        alive = sections.get("PID", "").strip() == "ALIVE"
+
+        status_raw = sections.get("STATUS", "").strip()
+        if status_raw:
+            status_lines = [ln.strip() for ln in status_raw.splitlines() if ln.strip()]
+            if status_lines:
+                exit_code = int(status_lines[0]) if status_lines[0].isdigit() else None
+                finished_at = status_lines[1] if len(status_lines) > 1 else None
 
         with self._lock:
             current = self._jobs.get(job_id)
@@ -1052,11 +1118,6 @@ class DeployController:
                 self._persist_job(current)
                 return
 
-        exit_code, finished_at = self._read_remote_status(target, job.get("_status_path"))
-        with self._lock:
-            current = self._jobs.get(job_id)
-            if current is None:
-                return
             current["finished_at"] = finished_at or current.get("finished_at") or _now_iso()
             if current.get("_stop_requested"):
                 current["state"] = "stopped"
@@ -1094,7 +1155,6 @@ class DeployController:
                 current = self._jobs.get(job_id)
                 if current is not None:
                     current[cache_key] = content
-                    self._persist_job(current)
 
         return DeployJobLogsResponse(
             job_id=job_id,
@@ -1126,10 +1186,18 @@ def _get_controller() -> DeployController:
 
 def build_deploy_overview(values: Optional[Dict[str, Any]] = None) -> DeployOverviewResponse:
     controller = _get_controller()
-    controller.refresh_jobs()
+    # Probe targets and refresh jobs in parallel to avoid sequential SSH waits
+    with ThreadPoolExecutor(max_workers=len(TARGET_ORDER) + 1, thread_name_prefix="overview") as pool:
+        probe_futures = {
+            target_id: pool.submit(controller.probe_target, target_id)
+            for target_id in TARGET_ORDER
+        }
+        refresh_future = pool.submit(controller.refresh_jobs)
+        refresh_future.result()
+        targets = [probe_futures[tid].result() for tid in TARGET_ORDER]
     return DeployOverviewResponse(
         refreshed_at=_now_iso(),
-        targets=[controller.probe_target(target_id) for target_id in TARGET_ORDER],
+        targets=targets,
         inputs=controller.input_specs(),
         commands=controller.command_specs(values),
         jobs=controller.list_jobs(),

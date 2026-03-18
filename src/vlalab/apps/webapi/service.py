@@ -256,6 +256,29 @@ print(json.dumps(items))
     return payload or []
 
 
+def _remote_stat_run_mtime(source: RunsSource, project: str, run_name: str) -> str:
+    """Get the last-modified timestamp of a remote run directory with a single stat call."""
+    code = """
+import json
+import sys
+from pathlib import Path
+
+runs_dir = Path(sys.argv[1]).resolve()
+project = sys.argv[2]
+run_name = sys.argv[3]
+run_path = (runs_dir / project / run_name).resolve()
+
+if not run_path.exists():
+    print(json.dumps({"ts": 0}))
+    raise SystemExit(0)
+
+print(json.dumps({"ts": run_path.stat().st_mtime}))
+"""
+    payload = _run_remote_json(source, code, [source.path, project, run_name], timeout=10.0)
+    ts = float((payload or {}).get("ts", 0))
+    return _iso_from_timestamp(ts) if ts > 0 else _iso_from_timestamp(0)
+
+
 def _remote_load_meta(source: RunsSource, project: str, run_name: str) -> Dict[str, Any]:
     code = """
 import json
@@ -709,14 +732,13 @@ def load_run_detail(
     if source.is_remote:
         meta = _remote_load_meta(source, project, run_name)
         steps = _remote_load_steps(source, project, run_name)
+        updated_at = _remote_stat_run_mtime(source, project, run_name)
         summary = build_run_summary(
             None,
             project=project,
             run_name=run_name,
             path_label=f"{source.path}/{project}/{run_name}",
-            updated_at=_iso_from_timestamp(
-                max([0.0] + [float(item.get("updated_at_ts") or 0.0) for item in _remote_runs_listing(source, project=project) if item.get("run_name") == run_name])
-            ),
+            updated_at=updated_at,
             meta=meta,
             steps=steps,
             include_latency=True,
