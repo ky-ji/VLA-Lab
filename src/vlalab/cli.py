@@ -12,6 +12,7 @@ Commands:
 
 import atexit
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -23,6 +24,7 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
+NEXTJS_NODE_VERSION_RANGE = "^18.18.0 || ^19.8.0 || >= 20.0.0"
 
 # PID file location
 def _get_pid_file(port: int, prefix: str = "view") -> Path:
@@ -78,6 +80,61 @@ def _resolve_web_dir() -> Path:
         if (candidate / "package.json").exists():
             return candidate
     raise FileNotFoundError("Could not locate the VLA-Lab web/ directory.")
+
+
+def _parse_node_version(version_text: str) -> Optional[tuple[int, int, int]]:
+    """Parse `node --version` output like `v20.12.2`."""
+    match = re.search(r"v?(\d+)\.(\d+)\.(\d+)", str(version_text or "").strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _is_supported_nextjs_node_version(version: tuple[int, int, int]) -> bool:
+    """Return whether the version satisfies Next.js 15's Node.js requirement."""
+    major, minor, patch = version
+    if major >= 20:
+        return True
+    if major == 19:
+        return (minor, patch) >= (8, 0)
+    if major == 18:
+        return (minor, patch) >= (18, 0)
+    return False
+
+
+def _require_compatible_frontend_node() -> str:
+    """Ensure Node.js is installed and new enough for the bundled Next.js app."""
+    try:
+        result = subprocess.run(
+            ["node", "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        console.print("[red]Node.js is required to run the VLA-Lab frontend, but `node` was not found.[/red]")
+        console.print("[yellow]Install Node.js 20+ (or any version matching "
+                      f"{NEXTJS_NODE_VERSION_RANGE}) and try again.[/yellow]")
+        raise click.Abort()
+
+    raw_version = result.stdout.strip() or result.stderr.strip()
+    parsed_version = _parse_node_version(raw_version)
+    if result.returncode != 0 or parsed_version is None:
+        console.print("[red]Could not determine the Node.js version for the frontend.[/red]")
+        if raw_version:
+            console.print(f"[yellow]`node --version` output: {raw_version}[/yellow]")
+        raise click.Abort()
+
+    if not _is_supported_nextjs_node_version(parsed_version):
+        console.print(
+            "[red]The bundled Next.js frontend requires a newer Node.js version.[/red]"
+        )
+        console.print(f"[yellow]Detected: {raw_version}[/yellow]")
+        console.print(f"[yellow]Required: {NEXTJS_NODE_VERSION_RANGE}[/yellow]")
+        console.print("[blue]Recommended fix: install Node.js 20 LTS, then reinstall frontend dependencies.[/blue]")
+        raise click.Abort()
+
+    return raw_version
 
 
 def _kill_process_on_port(port: int, force: bool = False) -> bool:
@@ -306,6 +363,9 @@ def _launch_web_services(
             console.print(f"[red]{exc}[/red]")
             _cleanup_on_exit(api_port, api_proc)
             raise click.Abort()
+
+        node_version = _require_compatible_frontend_node()
+        console.print(f"[green]Using Node.js {node_version} for the frontend.[/green]")
 
         frontend_env = env.copy()
         api_base_url = f"http://127.0.0.1:{api_port}"
@@ -632,14 +692,14 @@ def doctor():
             console.print(f"  [green]✓[/green] node_modules/ exists")
         else:
             console.print(f"  [yellow]○[/yellow] node_modules/ missing — run: cd web && npm install")
-        node_result = subprocess.run(
-            ["node", "--version"], capture_output=True, text=True
-        )
-        if node_result.returncode == 0:
-            console.print(f"  [green]✓[/green] Node.js: {node_result.stdout.strip()}")
-        else:
-            console.print(f"  [red]✗[/red] Node.js not found")
-            issues.append("Install Node.js: https://nodejs.org/")
+        try:
+            node_version = _require_compatible_frontend_node()
+            console.print(f"  [green]✓[/green] Node.js: {node_version}")
+            console.print(f"  [green]✓[/green] Frontend requirement: {NEXTJS_NODE_VERSION_RANGE}")
+        except click.Abort:
+            issues.append(
+                f"Install a compatible Node.js version for Next.js ({NEXTJS_NODE_VERSION_RANGE})"
+            )
     except FileNotFoundError:
         console.print(f"  [dim]○[/dim] web/ directory not found (OK if installed via pip)")
 
