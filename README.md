@@ -83,14 +83,14 @@ When real-world success stays low, compare deployment observations against the d
 <td align="center" width="50%">
 
 #### 1. 🎯 Open-Loop Evaluation
-<img src="assets/openloop_eval.png" width="100%"/>
+<img src="assets/readme_openloop_eval_workbench.png" width="100%"/>
 <sub>Default eval folders · GT vs Pred curves · trajectory metrics</sub>
 
 </td>
 <td align="center" width="50%">
 
 #### 2. 🔬 Real-Robot Run Replay
-<img src="assets/replay.png" width="100%"/>
+<img src="assets/readme_run_replay_workbench.png" width="100%"/>
 <sub>Multi-camera observations · state/action curves · action chunks · Rerun export</sub>
 
 </td>
@@ -99,7 +99,7 @@ When real-world success stays low, compare deployment observations against the d
 <td colspan="2" align="center">
 
 #### 3. 📊 Dataset / OOD Inspection
-<img src="assets/dataset_view.png" width="100%"/>
+<img src="assets/readme_dataset_ood_workbench.png" width="100%"/>
 <sub>Default dataset folders · video playback · state/action/gripper curves · workspace checks</sub>
 
 </td>
