@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -47,9 +48,17 @@ RunsSourceLike = Union[RunsSource, Path]
 
 def get_runs_source(dir_override: Optional[str] = None) -> RunsSource:
     """Return the effective runs source for the web API."""
-    if dir_override is None:
+    if dir_override is None and "VLALAB_DIR" not in os.environ:
         configured = resolve_dashboard_runs_config()
         if configured is not None:
+            configured_local_path = Path(configured.runs_dir).expanduser()
+            if configured_local_path.exists():
+                resolved_local_path = configured_local_path.resolve()
+                return RunsSource(
+                    path=str(resolved_local_path),
+                    display_path=str(resolved_local_path),
+                    local_path=resolved_local_path,
+                )
             return RunsSource(
                 path=configured.runs_dir,
                 display_path=configured.workdir,
@@ -57,6 +66,14 @@ def get_runs_source(dir_override: Optional[str] = None) -> RunsSource:
                 ssh_host=configured.ssh_host,
                 shell=configured.shell,
             )
+
+    if (
+        dir_override is None
+        and "VLALAB_DEPLOY_CONFIG" in os.environ
+        and "VLALAB_DIR" not in os.environ
+    ):
+        local_path = (Path.cwd() / "vlalab_runs").resolve()
+        return RunsSource(path=str(local_path), display_path=str(local_path), local_path=local_path)
 
     local_path = vlalab.get_runs_dir(dir_override).resolve()
     return RunsSource(path=str(local_path), display_path=str(local_path), local_path=local_path)

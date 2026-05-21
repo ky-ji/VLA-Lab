@@ -726,5 +726,59 @@ def doctor():
     console.print()
 
 
+@main.group("index")
+def index_group():
+    """Build and inspect the VLA-Lab sidecar index."""
+    pass
+
+
+@index_group.command("status")
+@click.argument("run_dir", type=click.Path(exists=True, file_okay=False))
+def index_status_command(run_dir: str):
+    """Show sidecar index status for a run directory."""
+    from vlalab.index.sidecar import index_status
+
+    console.print_json(data=index_status(Path(run_dir)))
+
+
+@index_group.command("build")
+@click.argument("run_dir", type=click.Path(exists=True, file_okay=False))
+@click.option("--force", is_flag=True, default=False, help="Rebuild even when the index is current")
+def index_build_command(run_dir: str, force: bool):
+    """Build the sidecar index for a run directory."""
+    from vlalab.index.sidecar import build_index
+
+    console.print_json(data=build_index(Path(run_dir), force=force))
+
+
+@main.group("rerun")
+def rerun_group():
+    """Build and inspect optional Rerun recordings for a run."""
+    pass
+
+
+@rerun_group.command("status")
+@click.argument("run_dir", type=click.Path(exists=True, file_okay=False))
+def rerun_status_command(run_dir: str):
+    """Show optional Rerun recording status for a run directory."""
+    from vlalab.index.sidecar import rerun_status
+
+    console.print_json(data=rerun_status(Path(run_dir)))
+
+
+@rerun_group.command("build")
+@click.argument("run_dir", type=click.Path(exists=True, file_okay=False))
+@click.option("--force", is_flag=True, default=False, help="Rebuild even when the recording is current")
+def rerun_build_command(run_dir: str, force: bool):
+    """Build a Rerun .rrd recording for a run directory."""
+    from vlalab.index.sidecar import build_rerun_recording
+
+    try:
+        console.print_json(data=build_rerun_recording(Path(run_dir), force=force))
+    except RuntimeError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise click.Abort()
+
+
 if __name__ == "__main__":
     main()

@@ -8,9 +8,18 @@ import {
   HeatmapChart,
   HistogramChart,
   LineChart,
-  SimpleTabs,
   TrajectoryProjection,
 } from "@/components/chart-kit";
+
+const DEFAULT_EVAL_PATH = "/data3/jikangye/workspace/baselines/vla-baselines/Isaac-GR00T/outputs/vlalab_eval";
+
+const EVAL_MODES = [
+  ["timeseries", "Timeseries"],
+  ["heatmap", "Error Map"],
+  ["metrics", "Metrics"],
+  ["trajectory", "Trajectory"],
+  ["plots", "Plots"],
+];
 
 function transpose(matrix) {
   if (!matrix?.length || !matrix[0]?.length) {
@@ -51,13 +60,42 @@ function inferDimCount(evalData) {
   );
 }
 
+function inferActionLabels(results, dimCount) {
+  const keys = results?.action_keys || [];
+  if (keys.length === dimCount) {
+    return keys;
+  }
+  if (keys.includes("robot_eef_pose") && dimCount >= 7) {
+    return ["eef_x", "eef_y", "eef_z", "eef_rx", "eef_ry", "eef_rz", "gripper"].slice(0, dimCount);
+  }
+  return Array.from({ length: dimCount }, (_, idx) => keys[idx] || `dim_${idx}`);
+}
+
+function pathName(path) {
+  if (!path) {
+    return "--";
+  }
+  return String(path).split("/").filter(Boolean).pop() || path;
+}
+
+function formatVector(values, limit = 7) {
+  if (!values?.length) {
+    return "--";
+  }
+  return values
+    .slice(0, limit)
+    .map((value) => formatNumber(value, 4))
+    .join(", ");
+}
+
 export default function EvalViewerClient() {
   const [source, setSource] = useState("dir");
-  const [dirPath, setDirPath] = useState("");
+  const [dirPath, setDirPath] = useState(DEFAULT_EVAL_PATH);
   const [resultsFile, setResultsFile] = useState("");
   const [trajId, setTrajId] = useState("");
   const [uploadedFileName, setUploadedFileName] = useState("");
   const [activeTab, setActiveTab] = useState("timeseries");
+  const [evalCandidates, setEvalCandidates] = useState(null);
   const [evalData, setEvalData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -75,6 +113,11 @@ export default function EvalViewerClient() {
         traj_id: nextTrajId === "" ? undefined : Number(nextTrajId),
       });
       setEvalData(data);
+      if (nextSource === "dir") {
+        setDirPath(data.dir_path || nextDirPath);
+        setResultsFile(data.selected_json || "");
+        setTrajId(data.selected_traj_id === null || data.selected_traj_id === undefined ? "" : String(data.selected_traj_id));
+      }
       const dims = inferDimCount(data);
       setSelectedDims(Array.from({ length: dims }, (_, idx) => idx));
       setTrajDims({
@@ -89,6 +132,33 @@ export default function EvalViewerClient() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadCandidates() {
+      try {
+        const payload = await browserFetchJson("/api/eval/candidates");
+        if (ignore) {
+          return;
+        }
+        setEvalCandidates(payload);
+        const defaultPath = payload?.default_path || DEFAULT_EVAL_PATH;
+        setDirPath(defaultPath);
+        loadEval("dir", defaultPath, "", "");
+      } catch (err) {
+        if (ignore) {
+          return;
+        }
+        setEvalCandidates({ default_path: DEFAULT_EVAL_PATH, candidates: [] });
+        setError(String(err.message || err));
+      }
+    }
+    loadCandidates();
+    return () => {
+      ignore = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial candidate bootstrap only
+  }, []);
 
   useEffect(() => {
     if (source === "demo") {
@@ -128,230 +198,265 @@ export default function EvalViewerClient() {
   const results = evalData?.results || {};
   const gtActions = evalData?.gt_actions || [];
   const predActions = evalData?.pred_actions || [];
+  const staticPngs = evalData?.static_pngs || [];
   const dimCount = inferDimCount(evalData);
-  const actionKeys = results.action_keys || Array.from({ length: dimCount }, (_, idx) => `dim_${idx}`);
+  const actionKeys = inferActionLabels(results, dimCount);
   const dimMetrics = useMemo(() => perDimMetrics(gtActions, predActions, actionKeys), [gtActions, predActions, actionKeys]);
+  const selectedDimSet = new Set(selectedDims);
+  const visibleDims = selectedDims.filter((idx) => idx >= 0 && idx < dimCount);
   const errorMatrix = transpose(
     gtActions.map((row, idx) => row.map((value, dim) => Math.abs(value - (predActions[idx]?.[dim] ?? 0))))
   );
-  const selectedDimSet = new Set(selectedDims);
+  const meanAbsoluteErrorSeries = gtActions.map((row, idx) =>
+    row.reduce((sum, value, dim) => sum + Math.abs(value - (predActions[idx]?.[dim] ?? 0)), 0) / Math.max(row.length, 1)
+  );
+  const defaultPath = evalCandidates?.default_path || DEFAULT_EVAL_PATH;
+  const candidateList = evalCandidates?.candidates || [];
+  const trajectoryRows = Array.isArray(results.results) ? results.results : [];
+  const selectedTrajectoryRow =
+    trajectoryRows.find((row) => String(row.trajectory_id) === String(trajId)) || trajectoryRows[0] || null;
+  const hasSeries = gtActions.length > 0 && predActions.length > 0;
+  const selectedTrajectoryLabel = evalData?.selected_traj_id ?? selectedTrajectoryRow?.trajectory_id ?? "--";
+  const metricCards = [
+    ["Trajectories", results.num_trajectories ?? trajectoryRows.length ?? 0],
+    ["Avg MSE", formatNumber(results.avg_mse, 6)],
+    ["Avg MAE", formatNumber(results.avg_mae, 6)],
+    ["Horizon", results.action_horizon ?? "--"],
+  ];
 
   return (
-    <div className="section-stack">
-      <section className="selection-panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Eval Viewer</p>
-            <h2>Open-loop 评估可视化</h2>
-          </div>
+    <div className="eval-workspace-shell">
+      <header className="eval-workspace-header">
+        <div className="eval-workspace-title">
+          <p className="eyebrow">Eval Viewer</p>
+          <h1>Open-loop 评估可视化</h1>
+          <p>{source === "dir" ? dirPath : uploadedFileName || "Demo / uploaded eval payload"}</p>
         </div>
-        <div className="selection-actions">
-          <button type="button" className={source === "dir" ? "tab-pill is-active" : "tab-pill"} onClick={() => setSource("dir")}>
-            浏览目录
-          </button>
-          <button type="button" className={source === "upload" ? "tab-pill is-active" : "tab-pill"} onClick={() => setSource("upload")}>
-            上传 JSON
-          </button>
-          <button type="button" className={source === "demo" ? "tab-pill is-active" : "tab-pill"} onClick={() => setSource("demo")}>
-            演示数据
+        <div className="eval-workspace-pathbar">
+          <input
+            value={dirPath}
+            onChange={(event) => setDirPath(event.target.value)}
+            placeholder={defaultPath}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setSource("dir");
+              loadEval("dir", dirPath, resultsFile, trajId);
+            }}
+            disabled={loading}
+          >
+            {loading ? "Loading" : "Load"}
           </button>
         </div>
+      </header>
 
-        {source === "dir" ? (
-          <div className="form-grid form-grid-wide">
-            <input
-              value={dirPath}
-              onChange={(event) => setDirPath(event.target.value)}
-              placeholder="/path/to/eval_outputs"
-            />
-            <button type="button" onClick={() => loadEval("dir", dirPath, resultsFile, trajId)}>
-              {loading ? "加载中..." : "加载目录"}
-            </button>
-          </div>
-        ) : null}
+      {error ? <div className="eval-workspace-error">{error}</div> : null}
 
-        {source === "upload" ? (
-          <div className="selection-actions">
-            <input
-              type="file"
-              accept=".json,application/json"
-              onChange={(event) => handleUpload(event.target.files?.[0])}
-            />
-            <span className="muted">{uploadedFileName || "上传本地 results.json 进行查看"}</span>
-          </div>
-        ) : null}
-
-        {source === "demo" ? (
-          <div className="selection-actions">
-            <button type="button" onClick={() => loadEval("demo", "", "", "")}>
-              重新生成演示数据
-            </button>
-          </div>
-        ) : null}
-
-        {error ? <div className="placeholder-note">{error}</div> : null}
-      </section>
-
-      {evalData ? (
-        <>
-          <section className="section-panel">
-            <div className="timing-grid">
-              <div className="kpi-card">
-                <span className="stat-label">Trajectories</span>
-                <strong>{results.num_trajectories ?? 0}</strong>
-              </div>
-              <div className="kpi-card">
-                <span className="stat-label">Avg MSE</span>
-                <strong>{formatNumber(results.avg_mse, 6)}</strong>
-              </div>
-              <div className="kpi-card">
-                <span className="stat-label">Avg MAE</span>
-                <strong>{formatNumber(results.avg_mae, 6)}</strong>
-              </div>
-              <div className="kpi-card">
-                <span className="stat-label">Action Horizon</span>
-                <strong>{results.action_horizon ?? "--"}</strong>
-              </div>
-            </div>
+      <div className="eval-workspace-grid">
+        <aside className="eval-workspace-rail">
+          <section className="eval-workspace-panel eval-workspace-mode-panel">
+            {EVAL_MODES.map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                className={`eval-workspace-mode-button${activeTab === mode ? " is-active" : ""}`}
+                onClick={() => setActiveTab(mode)}
+              >
+                {label}
+              </button>
+            ))}
           </section>
 
-          {results?.results?.length ? (
-            <section className="section-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">Summary</p>
-                  <h2>轨迹级评估摘要</h2>
-                </div>
-              </div>
-              <div className="table-shell">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Trajectory</th>
-                      <th>MSE</th>
-                      <th>MAE</th>
-                      <th>Steps</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.results.map((row, index) => (
-                      <tr key={`${row.trajectory_id ?? index}`}>
-                        <td>{row.trajectory_id ?? index}</td>
-                        <td>{formatNumber(row.mse, 6)}</td>
-                        <td>{formatNumber(row.mae, 6)}</td>
-                        <td>{row.num_steps ?? "--"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ) : null}
+          <section className="eval-workspace-panel eval-workspace-source-panel">
+            <div className="eval-workspace-panel-head">
+              <span>Source</span>
+              <strong>{source}</strong>
+            </div>
+            <div className="eval-workspace-source-buttons">
+              {[
+                ["dir", "Directory"],
+                ["upload", "Upload"],
+                ["demo", "Demo"],
+              ].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={source === mode ? "is-active" : ""}
+                  onClick={() => {
+                    setSource(mode);
+                    if (mode === "dir") {
+                      loadEval("dir", dirPath || defaultPath, resultsFile, trajId);
+                    }
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {source === "upload" ? (
+              <label className="eval-workspace-file-input">
+                <span>Results JSON</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => handleUpload(event.target.files?.[0])}
+                />
+              </label>
+            ) : null}
+            {source === "demo" ? (
+              <button type="button" className="eval-workspace-default-button" onClick={() => loadEval("demo", "", "", "")}>
+                重新生成演示数据
+              </button>
+            ) : null}
+          </section>
 
           {source === "dir" ? (
-            <section className="selection-panel">
-              <div className="form-grid form-grid-wide">
-                <select value={resultsFile} onChange={(event) => setResultsFile(event.target.value)}>
-                  <option value="">选择结果文件</option>
-                  {(evalData.json_files || []).map((fileName) => (
-                    <option key={fileName} value={fileName}>
-                      {fileName}
-                    </option>
-                  ))}
-                </select>
-                <select value={trajId} onChange={(event) => setTrajId(event.target.value)}>
-                  <option value="">选择轨迹</option>
-                  {(evalData.available_traj_ids || []).map((value) => (
-                    <option key={value} value={value}>
-                      Trajectory {value}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" onClick={() => loadEval("dir", dirPath, resultsFile, trajId)}>
-                  加载轨迹
-                </button>
-              </div>
-            </section>
-          ) : null}
-
-          {gtActions.length && predActions.length ? (
             <>
-              <section className="selection-panel">
-                <div className="section-heading">
-                  <div>
-                    <p className="eyebrow">Dimensions</p>
-                    <h2>选择显示维度</h2>
-                  </div>
+              <section className="eval-workspace-panel">
+                <div className="eval-workspace-panel-head">
+                  <span>Default</span>
+                  <strong>{pathName(defaultPath)}</strong>
                 </div>
-                <div className="checkbox-grid">
-                  {actionKeys.map((label, idx) => (
-                    <label key={label} className="checkbox-item">
-                      <input
-                        type="checkbox"
-                        checked={selectedDimSet.has(idx)}
-                        onChange={(event) => {
-                          setSelectedDims((current) =>
-                            event.target.checked
-                              ? [...current, idx].sort((a, b) => a - b)
-                              : current.filter((value) => value !== idx)
-                          );
-                        }}
-                      />
-                      <span>{label}</span>
-                    </label>
+                <button
+                  type="button"
+                  className="eval-workspace-default-button eval-candidate-card"
+                  onClick={() => {
+                    setDirPath(defaultPath);
+                    setResultsFile("");
+                    setTrajId("");
+                    loadEval("dir", defaultPath, "", "");
+                  }}
+                >
+                  {defaultPath}
+                </button>
+              </section>
+
+              <section className="eval-workspace-panel eval-workspace-candidates">
+                <div className="eval-workspace-panel-head">
+                  <span>Candidates</span>
+                  <strong>{candidateList.length}</strong>
+                </div>
+                <div className="eval-candidate-grid">
+                  {candidateList.map((candidate) => (
+                    <button
+                      type="button"
+                      key={candidate.path}
+                      className={`eval-workspace-candidate-card eval-candidate-card dataset-candidate-card${
+                        dirPath === candidate.path ? " is-active" : ""
+                      }`}
+                      onClick={() => {
+                        setDirPath(candidate.path);
+                        setResultsFile("");
+                        setTrajId("");
+                        loadEval("dir", candidate.path, "", "");
+                      }}
+                    >
+                      <span>{candidate.format || "openloop"}</span>
+                      <strong>{candidate.name || pathName(candidate.path)}</strong>
+                      <small>
+                        {candidate.json_count ?? 0} json · {candidate.trajectory_count ?? 0} traj · {candidate.png_count ?? 0} plots
+                      </small>
+                      <p>{candidate.path}</p>
+                    </button>
                   ))}
                 </div>
-                <SimpleTabs
-                  activeTab={activeTab}
-                  onChange={setActiveTab}
-                  tabs={[
-                    { key: "timeseries", label: "时序对比" },
-                    { key: "heatmap", label: "误差热力图" },
-                    { key: "metrics", label: "维度分析" },
-                    { key: "trajectory", label: "3D 轨迹" },
-                    { key: "distribution", label: "误差分布" },
-                  ]}
-                />
+              </section>
+
+              {evalData ? (
+                <section className="eval-workspace-panel eval-workspace-trajectory-panel">
+                  <label>
+                    <span>Result file</span>
+                    <select value={resultsFile} onChange={(event) => setResultsFile(event.target.value)}>
+                      <option value="">选择结果文件</option>
+                      {(evalData.json_files || []).map((fileName) => (
+                        <option key={fileName} value={fileName}>
+                          {fileName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Trajectory</span>
+                    <select value={trajId} onChange={(event) => setTrajId(event.target.value)}>
+                      <option value="">选择轨迹</option>
+                      {(evalData.available_traj_ids || []).map((value) => (
+                        <option key={value} value={value}>
+                          Trajectory {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="button" onClick={() => loadEval("dir", dirPath, resultsFile, trajId)}>
+                    加载轨迹
+                  </button>
+                </section>
+              ) : null}
+            </>
+          ) : null}
+        </aside>
+
+        <main className="eval-workspace-viewer">
+          {evalData ? (
+            <>
+              <section className="eval-workspace-panel eval-workspace-viewer-head">
+                <div>
+                  <span>Trajectory</span>
+                  <strong>{selectedTrajectoryLabel}</strong>
+                </div>
+                <div>
+                  <span>Steps</span>
+                  <strong>{gtActions.length || selectedTrajectoryRow?.num_steps || "--"}</strong>
+                </div>
+                <div>
+                  <span>Mode</span>
+                  <strong>{EVAL_MODES.find(([mode]) => mode === activeTab)?.[1]}</strong>
+                </div>
               </section>
 
               {activeTab === "timeseries" ? (
-                <section className="section-stack">
-                  {selectedDims.map((dimIdx) => (
-                    <LineChart
-                      key={dimIdx}
-                      title={actionKeys[dimIdx]}
-                      xLabel={`X 轴: trajectory step (action horizon ${results.action_horizon ?? "--"})`}
-                      series={[
-                        { name: "GT", values: gtActions.map((row) => row[dimIdx]), color: "#0f766e" },
-                        { name: "Pred", values: predActions.map((row) => row[dimIdx]), color: "#dc2626" },
-                      ]}
-                    />
-                  ))}
+                <section className="eval-workspace-chart-grid">
+                  {hasSeries && visibleDims.length ? (
+                    visibleDims.map((dimIdx) => (
+                      <LineChart
+                        key={dimIdx}
+                        title={actionKeys[dimIdx]}
+                        xLabel={`X axis: trajectory step (${gtActions.length} steps)`}
+                        series={[
+                          { name: "GT", values: gtActions.map((row) => row[dimIdx]), color: "#0f766e" },
+                          { name: "Pred", values: predActions.map((row) => row[dimIdx]), color: "#dc2626" },
+                        ]}
+                      />
+                    ))
+                  ) : (
+                    <section className="eval-workspace-panel eval-workspace-empty">No trajectory arrays loaded.</section>
+                  )}
                 </section>
               ) : null}
 
               {activeTab === "heatmap" ? (
-                <section className="section-stack">
-                  <HeatmapChart matrix={errorMatrix} rowLabels={actionKeys} title="Absolute error heatmap" />
-                  <LineChart
-                    title="Mean absolute error over time"
-                    xLabel="X 轴: trajectory step"
-                    series={[
-                      {
-                        name: "MAE",
-                        values: gtActions.map((row, idx) =>
-                          row.reduce((sum, value, dim) => sum + Math.abs(value - (predActions[idx]?.[dim] ?? 0)), 0) /
-                          Math.max(row.length, 1)
-                        ),
-                        color: "#c2410c",
-                      },
-                    ]}
-                  />
+                <section className="eval-workspace-analysis-grid">
+                  {hasSeries ? (
+                    <>
+                      <HeatmapChart matrix={errorMatrix} rowLabels={actionKeys} title="Absolute error heatmap" />
+                      <LineChart
+                        title="Mean absolute error over time"
+                        xLabel="X axis: trajectory step"
+                        series={[{ name: "MAE", values: meanAbsoluteErrorSeries, color: "#c2410c" }]}
+                      />
+                    </>
+                  ) : (
+                    <section className="eval-workspace-panel eval-workspace-empty">No trajectory arrays loaded.</section>
+                  )}
                 </section>
               ) : null}
 
               {activeTab === "metrics" ? (
-                <section className="section-panel">
+                <section className="eval-workspace-panel">
+                  <div className="eval-workspace-panel-head">
+                    <span>Dimension Metrics</span>
+                    <strong>{dimMetrics.length}</strong>
+                  </div>
                   <div className="table-shell">
                     <table className="data-table">
                       <thead>
@@ -382,41 +487,25 @@ export default function EvalViewerClient() {
               ) : null}
 
               {activeTab === "trajectory" ? (
-                <section className="section-stack">
-                  <section className="selection-panel">
-                    <div className="control-grid">
-                      <label>
-                        <span>X 维度</span>
-                        <select value={trajDims.x} onChange={(event) => setTrajDims((current) => ({ ...current, x: Number(event.target.value) }))}>
-                          {actionKeys.map((label, idx) => (
-                            <option key={`x-${label}`} value={idx}>
-                              {label}
+                <section className="eval-workspace-panel eval-workspace-trajectory-view">
+                  <div className="eval-workspace-axis-controls">
+                    {[
+                      ["x", "X dim"],
+                      ["y", "Y dim"],
+                      ["z", "Z dim"],
+                    ].map(([axis, label]) => (
+                      <label key={axis}>
+                        <span>{label}</span>
+                        <select value={trajDims[axis]} onChange={(event) => setTrajDims((current) => ({ ...current, [axis]: Number(event.target.value) }))}>
+                          {actionKeys.map((labelText, idx) => (
+                            <option key={`${axis}-${labelText}`} value={idx}>
+                              {labelText}
                             </option>
                           ))}
                         </select>
                       </label>
-                      <label>
-                        <span>Y 维度</span>
-                        <select value={trajDims.y} onChange={(event) => setTrajDims((current) => ({ ...current, y: Number(event.target.value) }))}>
-                          {actionKeys.map((label, idx) => (
-                            <option key={`y-${label}`} value={idx}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        <span>Z 维度</span>
-                        <select value={trajDims.z} onChange={(event) => setTrajDims((current) => ({ ...current, z: Number(event.target.value) }))}>
-                          {actionKeys.map((label, idx) => (
-                            <option key={`z-${label}`} value={idx}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                  </section>
+                    ))}
+                  </div>
                   <TrajectoryProjection
                     title="GT vs Pred trajectory"
                     series={[
@@ -436,49 +525,150 @@ export default function EvalViewerClient() {
                 </section>
               ) : null}
 
-              {activeTab === "distribution" ? (
-                <section className="detail-grid">
-                  {selectedDims.map((dimIdx) => (
-                    <HistogramChart
-                      key={dimIdx}
-                      title={`${actionKeys[dimIdx]} error`}
-                      values={gtActions.map((row, idx) => (row[dimIdx] ?? 0) - (predActions[idx]?.[dimIdx] ?? 0))}
-                      color={["#0f766e", "#c2410c", "#2563eb", "#7c3aed"][dimIdx % 4]}
-                    />
-                  ))}
+              {activeTab === "plots" ? (
+                <section className="eval-workspace-panel">
+                  <div className="eval-workspace-panel-head">
+                    <span>Static Plots</span>
+                    <strong>{staticPngs.length}</strong>
+                  </div>
+                  {staticPngs.length ? (
+                    <div className="eval-workspace-static-grid gallery-grid">
+                      {staticPngs.map((image) => (
+                        <figure key={image.path}>
+                          <img
+                            src={toPublicApiUrl(`/api/eval/static-image?path=${encodeURIComponent(image.path)}&dir_path=${encodeURIComponent(evalData.dir_path || "")}`)}
+                            alt={image.name}
+                          />
+                          <figcaption>{image.name}</figcaption>
+                        </figure>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="eval-workspace-empty">No saved PNG plots in this eval folder.</div>
+                  )}
                 </section>
               ) : null}
             </>
           ) : (
-            <section className="section-stack">
-              <section className="placeholder-panel">
-                <p>当前数据源没有加载到可交互的轨迹数组，可以先查看汇总指标或静态图。</p>
-              </section>
-              {evalData.static_pngs?.length ? (
-                <section className="section-panel">
-                  <div className="section-heading">
-                    <div>
-                      <p className="eyebrow">Static Plots</p>
-                      <h2>回退到已保存的 PNG 图</h2>
-                    </div>
-                  </div>
-                  <div className="gallery-grid">
-                    {evalData.static_pngs.map((image) => (
-                      <figure key={image.path}>
-                        <img
-                          src={toPublicApiUrl(`/api/eval/static-image?path=${encodeURIComponent(image.path)}`)}
-                          alt={image.name}
-                        />
-                        <figcaption>{image.name}</figcaption>
-                      </figure>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
+            <section className="eval-workspace-panel eval-workspace-empty-state">
+              <p className="eyebrow">No Eval Loaded</p>
+              <h2>选择候选目录或上传 results.json</h2>
+              <p>默认会优先加载 Isaac-GR00T 的 vlalab_eval 输出。</p>
             </section>
           )}
-        </>
-      ) : null}
+        </main>
+
+        <aside className="eval-workspace-inspector">
+          <section className="eval-workspace-panel">
+            <div className="eval-workspace-panel-head">
+              <span>Overview</span>
+              <strong>{pathName(evalData?.dir_path || uploadedFileName || "eval")}</strong>
+            </div>
+            <div className="eval-workspace-metric-grid">
+              {metricCards.map(([label, value]) => (
+                <div key={label}>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {selectedTrajectoryRow ? (
+            <section className="eval-workspace-panel">
+              <div className="eval-workspace-panel-head">
+                <span>Selected</span>
+                <strong>{selectedTrajectoryLabel}</strong>
+              </div>
+              <div className="eval-workspace-current-values">
+                <div>
+                  <span>MSE / MAE</span>
+                  <p>{formatNumber(selectedTrajectoryRow.mse, 6)} / {formatNumber(selectedTrajectoryRow.mae, 6)}</p>
+                </div>
+                <div>
+                  <span>GT first</span>
+                  <p>{formatVector(gtActions[0])}</p>
+                </div>
+                <div>
+                  <span>Pred first</span>
+                  <p>{formatVector(predActions[0])}</p>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {trajectoryRows.length ? (
+            <section className="eval-workspace-panel">
+              <div className="eval-workspace-panel-head">
+                <span>Summary</span>
+                <strong>{trajectoryRows.length}</strong>
+              </div>
+              <div className="eval-workspace-summary-table">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Traj</th>
+                      <th>MSE</th>
+                      <th>Steps</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trajectoryRows.map((row, index) => (
+                      <tr key={`${row.trajectory_id ?? index}`}>
+                        <td>{row.trajectory_id ?? index}</td>
+                        <td>{formatNumber(row.mse, 5)}</td>
+                        <td>{row.num_steps ?? "--"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
+
+          {hasSeries ? (
+            <section className="eval-workspace-panel">
+              <div className="eval-workspace-panel-head">
+                <span>Dimensions</span>
+                <strong>{visibleDims.length} / {dimCount}</strong>
+              </div>
+              <div className="eval-workspace-dim-grid">
+                {actionKeys.map((label, idx) => (
+                  <label key={label} className="checkbox-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedDimSet.has(idx)}
+                      onChange={(event) => {
+                        setSelectedDims((current) =>
+                          event.target.checked
+                            ? [...current, idx].sort((a, b) => a - b)
+                            : current.filter((value) => value !== idx)
+                        );
+                      }}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="eval-workspace-dim-table">
+                {dimMetrics.slice(0, 8).map((row) => (
+                  <div key={row.label}>
+                    <span>{row.label}</span>
+                    <strong>{formatNumber(row.mae, 5)}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="eval-workspace-panel">
+            <details>
+              <summary>Raw results JSON</summary>
+              <pre>{JSON.stringify(results || {}, null, 2)}</pre>
+            </details>
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }

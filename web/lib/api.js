@@ -43,6 +43,19 @@ function buildUrl(path, params = {}) {
   return url.toString();
 }
 
+async function readResponseBody(response) {
+  const text = await response.text();
+  if (!text) {
+    return { text: "", json: null };
+  }
+
+  try {
+    return { text, json: JSON.parse(text) };
+  } catch (error) {
+    return { text, json: null };
+  }
+}
+
 async function fetchJson(path, params = {}, options = {}) {
   const { allow404 = false } = options;
   const response = await fetch(buildUrl(path, params), {
@@ -53,12 +66,17 @@ async function fetchJson(path, params = {}, options = {}) {
     return null;
   }
 
+  const { text, json } = await readResponseBody(response);
+
   if (!response.ok) {
-    const detail = await response.text();
+    const detail =
+      json?.detail ||
+      json?.message ||
+      text;
     throw new Error(detail || `Request failed: ${response.status} ${response.statusText}`);
   }
 
-  return response.json();
+  return json;
 }
 
 async function safeFetch(path, params = {}, options = {}) {
@@ -81,28 +99,30 @@ export async function browserPostJson(path, body = {}, options = {}) {
     },
     body: JSON.stringify(body),
   });
+  const { text, json } = await readResponseBody(response);
   if (!response.ok) {
-    let detail = "";
-    try {
-      const payload = await response.json();
-      detail = payload?.detail || payload?.message || JSON.stringify(payload);
-    } catch (error) {
-      detail = await response.text();
-    }
+    const detail =
+      json?.detail ||
+      json?.message ||
+      text;
     throw new Error(detail || `Request failed: ${response.status}`);
   }
-  return response.json();
+  return json;
 }
 
 export async function browserDelete(path) {
   const response = await fetch(buildUrl(path), {
     method: "DELETE",
   });
+  const { text, json } = await readResponseBody(response);
   if (!response.ok) {
-    const detail = await response.text();
+    const detail =
+      json?.detail ||
+      json?.message ||
+      text;
     throw new Error(detail || `Request failed: ${response.status}`);
   }
-  return response.json();
+  return json;
 }
 
 export async function getOverview() {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import mimetypes
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
@@ -28,7 +29,7 @@ from .models import (
     RunListResponse,
     RunStepsResponse,
 )
-from .dataset_service import inspect_dataset, load_dataset_episode_view
+from .dataset_service import inspect_dataset, list_dataset_candidates, load_dataset_episode_view
 from .deploy_service import (
     build_deploy_overview,
     get_deploy_job_logs,
@@ -37,8 +38,19 @@ from .deploy_service import (
     save_deploy_input_values,
     stop_deploy_job,
 )
-from .eval_service import load_eval_inline, load_eval_view
+from .eval_service import list_eval_candidates, load_eval_inline, load_eval_view
 from .replay_service import delete_run, generate_attention, load_attention_state, load_run_replay
+from vlalab.index.sidecar import (
+    build_index,
+    build_rerun_recording,
+    index_status,
+    load_replay_summary,
+    load_replay_window,
+    load_series,
+    rerun_file_path,
+    rerun_status as load_rerun_status,
+    serve_rerun_recording,
+)
 from .service import (
     build_latency_compare,
     count_runs,
@@ -49,6 +61,7 @@ from .service import (
     load_run_steps,
     read_artifact_bytes,
     resolve_artifact_path,
+    resolve_run_path,
 )
 
 app = FastAPI(
@@ -176,6 +189,99 @@ def run_replay(project: str, run_name: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def _local_run_path(project: str, run_name: str):
+    runs_source = get_runs_source()
+    if runs_source.is_remote:
+        raise HTTPException(status_code=400, detail="Sidecar index endpoints require a local runs directory")
+    try:
+        return resolve_run_path(runs_source, project, run_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/runs/{project}/{run_name}/index/status")
+def run_index_status(project: str, run_name: str) -> dict:
+    run_path = _local_run_path(project, run_name)
+    return index_status(run_path)
+
+
+@app.post("/api/runs/{project}/{run_name}/index/build")
+def run_index_build(project: str, run_name: str, force: bool = False) -> dict:
+    run_path = _local_run_path(project, run_name)
+    return build_index(run_path, force=force)
+
+
+@app.get("/api/runs/{project}/{run_name}/replay/summary")
+def run_replay_summary(project: str, run_name: str) -> dict:
+    run_path = _local_run_path(project, run_name)
+    return load_replay_summary(run_path, project, run_name)
+
+
+@app.get("/api/runs/{project}/{run_name}/replay/window")
+def run_replay_window(
+    project: str,
+    run_name: str,
+    center: int = 0,
+    radius: int = 12,
+) -> dict:
+    run_path = _local_run_path(project, run_name)
+    return load_replay_window(run_path, project, run_name, center=center, radius=radius)
+
+
+@app.get("/api/runs/{project}/{run_name}/series")
+def run_series(
+    project: str,
+    run_name: str,
+    entities: List[str] = Query(default_factory=list),
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    stride: int = 1,
+) -> dict:
+    run_path = _local_run_path(project, run_name)
+    return load_series(run_path, entities=entities, start=start, end=end, stride=stride)
+
+
+@app.get("/api/runs/{project}/{run_name}/rerun/status")
+def run_rerun_status(project: str, run_name: str) -> dict:
+    run_path = _local_run_path(project, run_name)
+    status = load_rerun_status(run_path)
+    status["url"] = f"/api/runs/{project}/{run_name}/rerun/file"
+    return status
+
+
+@app.post("/api/runs/{project}/{run_name}/rerun/build")
+def run_rerun_build(project: str, run_name: str, force: bool = False) -> dict:
+    run_path = _local_run_path(project, run_name)
+    try:
+        status = build_rerun_recording(run_path, force=force)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    status["url"] = f"/api/runs/{project}/{run_name}/rerun/file"
+    return status
+
+
+@app.post("/api/runs/{project}/{run_name}/rerun/open")
+def run_rerun_open(project: str, run_name: str, force: bool = False) -> dict:
+    run_path = _local_run_path(project, run_name)
+    try:
+        status = serve_rerun_recording(run_path, force=force)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    status["url"] = f"/api/runs/{project}/{run_name}/rerun/file"
+    return status
+
+
+@app.get("/api/runs/{project}/{run_name}/rerun/file")
+def run_rerun_file(project: str, run_name: str):
+    run_path = _local_run_path(project, run_name)
+    path = rerun_file_path(run_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Rerun recording has not been built")
+    return FileResponse(path, media_type="application/octet-stream", filename="recording.rrd")
+
+
 @app.delete("/api/runs/{project}/{run_name}")
 def delete_run_route(project: str, run_name: str) -> dict:
     runs_source = get_runs_source()
@@ -275,6 +381,11 @@ def dataset_inspect(path: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/datasets/candidates")
+def dataset_candidates() -> dict:
+    return list_dataset_candidates()
+
+
 @app.get("/api/datasets/episode")
 def dataset_episode(
     path: str,
@@ -317,6 +428,11 @@ def eval_view(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/eval/candidates")
+def eval_candidates() -> dict:
+    return list_eval_candidates()
 
 
 @app.post("/api/eval/inline")

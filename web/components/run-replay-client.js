@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
-import { browserDelete, browserFetchJson, browserPostJson, toPublicApiUrl } from "@/lib/api";
-import { formatDate, formatMs, formatNumber, formatShortText } from "@/lib/format";
+import { browserFetchJson, browserPostJson, toPublicApiUrl } from "@/lib/api";
+import { formatDate, formatMs, formatNumber } from "@/lib/format";
 import {
   HistogramChart,
   LineChart,
-  SimpleTabs,
   TimelineEvents,
-  TrajectoryProjection,
 } from "@/components/chart-kit";
+import { RunWorkspaceInspector, RunWorkspaceRail } from "@/components/run-workspace-inspector";
+import { RunWorkspaceViewer } from "@/components/run-workspace-viewer";
 
 const PALETTE = ["#0f766e", "#c2410c", "#2563eb", "#7c3aed", "#0891b2", "#be123c", "#65a30d"];
 
@@ -39,6 +38,21 @@ function seriesForGroup(matrix, labels, group) {
     values: matrix.map((row) => row?.[idx] ?? null),
     color: pickColor(offset),
   }));
+}
+
+function groupByKey(groups = [], key, fallbackIndices = [], title = key) {
+  return groups.find((group) => group?.key === key) || {
+    key,
+    title,
+    indices: fallbackIndices,
+  };
+}
+
+function labelIndex(labels = [], candidates = []) {
+  const normalized = labels.map((label) => String(label || "").toLowerCase());
+  return candidates
+    .map((candidate) => normalized.indexOf(String(candidate).toLowerCase()))
+    .find((idx) => idx >= 0) ?? -1;
 }
 
 function finiteNumbers(values = []) {
@@ -223,6 +237,86 @@ function positionMagnitude(actions) {
 
 function currentChunkBoundary(expandedExecution, stepIdx) {
   return expandedExecution?.chunk_boundaries?.[stepIdx] || { start: 0, end: 0 };
+}
+
+function mergeStepDetails(previous = [], totalSteps = 0, incoming = []) {
+  const next = Array.from({ length: Math.max(totalSteps, previous.length) }, (_, idx) => previous[idx] || null);
+  for (const step of incoming || []) {
+    const idx = Number(step?.step_idx);
+    if (Number.isInteger(idx) && idx >= 0 && idx < next.length) {
+      next[idx] = step;
+    }
+  }
+  return next;
+}
+
+function timingFromSeries(replay, idx) {
+  const series = replay?.timing_series || {};
+  return {
+    transport_latency_ms: series.transport_latency_ms?.[idx] ?? null,
+    inference_latency_ms: series.inference_latency_ms?.[idx] ?? null,
+    total_latency_ms: series.total_latency_ms?.[idx] ?? null,
+    message_interval_ms: series.message_interval_ms?.[idx] ?? null,
+  };
+}
+
+function fallbackStep(replay, idx) {
+  return {
+    step_idx: idx,
+    prompt: replay?.meta?.task_prompt || null,
+    tags: {},
+    state: replay?.states?.[idx] || [],
+    action_preview: replay?.first_actions?.[idx] || [],
+    action_chunk: [],
+    timing: timingFromSeries(replay, idx),
+    images: [],
+    raw_step: null,
+  };
+}
+
+function hasStepDetail(step) {
+  return Boolean(step && step.step_idx !== undefined);
+}
+
+function windowKey(center, radius) {
+  return `${Number(center)}:${Number(radius)}`;
+}
+
+function parseWindowKey(key) {
+  const [center, radius] = String(key).split(":").map((value) => Number(value));
+  return { center, radius };
+}
+
+function windowKeyCoversStep(key, stepIdx, maxStep) {
+  const { center, radius } = parseWindowKey(key);
+  if (!Number.isFinite(center) || !Number.isFinite(radius)) {
+    return false;
+  }
+  return stepIdx >= Math.max(0, center - radius) && stepIdx <= Math.min(maxStep, center + radius);
+}
+
+function rerunViewerHref(status) {
+  if (typeof window === "undefined" || !status) {
+    return "";
+  }
+  if (status.viewer_url) {
+    return status.viewer_url;
+  }
+  if (status.server?.viewer_url) {
+    return status.server.viewer_url;
+  }
+  const recordingUrl = status.recording_url || status.server?.recording_url;
+  const viewerBase = String(
+    status.web_viewer_url || status.server?.web_viewer_url || process.env.NEXT_PUBLIC_RERUN_VIEWER_BASE_URL || "https://app.rerun.io"
+  ).replace(/\/$/, "");
+  if (recordingUrl) {
+    return `${viewerBase}/?url=${encodeURIComponent(recordingUrl)}`;
+  }
+  if (status.url) {
+    const rrdUrl = new URL(status.url, window.location.origin).toString();
+    return `${viewerBase}/?url=${encodeURIComponent(rrdUrl)}`;
+  }
+  return "";
 }
 
 function stepWindow(stepIdx, maxStep, radius = 4) {
@@ -774,7 +868,6 @@ function AttentionCompareGrid({ sourceImages = [], overlays = [] }) {
 }
 
 export default function RunReplayClient({ replay, project, runName }) {
-  const router = useRouter();
   const [activeTab, setActiveTab] = useState("replay");
   const [globalView, setGlobalView] = useState("inference");
   const [stepIdx, setStepIdx] = useState(0);
@@ -782,6 +875,7 @@ export default function RunReplayClient({ replay, project, runName }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackMs, setPlaybackMs] = useState(220);
   const [selectedCamera, setSelectedCamera] = useState("all");
+  const [railCollapsed, setRailCollapsed] = useState(false);
   const [attentionLayer, setAttentionLayer] = useState(-1);
   const [attentionDevice, setAttentionDevice] = useState("cuda:0");
   const [attentionModelPath, setAttentionModelPath] = useState("");
@@ -792,16 +886,26 @@ export default function RunReplayClient({ replay, project, runName }) {
   const [isLoadingAttention, setIsLoadingAttention] = useState(false);
   const [isGeneratingAttention, setIsGeneratingAttention] = useState(false);
   const [attentionReloadKey, setAttentionReloadKey] = useState(0);
-  const [filmstripCamera, setFilmstripCamera] = useState("");
-  const [deleteArmed, setDeleteArmed] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [stepDetails, setStepDetails] = useState(() => replay.step_details || []);
+  const [pendingWindowKeys, setPendingWindowKeys] = useState([]);
+  const [stepWindowError, setStepWindowError] = useState("");
+  const [rerunStatus, setRerunStatus] = useState(replay.rerun_status || null);
+  const [rerunError, setRerunError] = useState("");
+  const [isBuildingRerun, setIsBuildingRerun] = useState(false);
+  const [, startTransition] = useTransition();
+  const lastPlaybackTickRef = useRef(null);
+  const pendingWindowKeysRef = useRef(new Set());
+  const requestedWindowKeysRef = useRef(new Set());
 
   const summary = replay.summary;
   const meta = replay.meta || {};
-  const steps = replay.step_details || [];
-  const currentStep = steps[stepIdx] || steps[0] || {};
-  const maxStep = Math.max(0, steps.length - 1);
-  const currentBoundary = currentChunkBoundary(replay.expanded_execution, stepIdx);
+  const totalSteps = summary.total_steps ?? stepDetails.length;
+  const maxStep = Math.max(0, totalSteps - 1);
+  const steps = stepDetails;
+  const currentStep = steps[stepIdx] || fallbackStep(replay, stepIdx);
+  const currentBoundary = currentStep.action_chunk?.length
+    ? { start: stepIdx, end: stepIdx + currentStep.action_chunk.length }
+    : currentChunkBoundary(replay.expanded_execution, stepIdx);
   const nearbySteps = stepWindow(stepIdx, maxStep, 5);
   const allCameras = useMemo(() => replay.camera_names || [], [replay.camera_names]);
   const currentExecution = useMemo(() => executionRows(replay, currentBoundary), [replay, currentBoundary]);
@@ -810,6 +914,62 @@ export default function RunReplayClient({ replay, project, runName }) {
     { label: "中", value: 220 },
     { label: "快", value: 120 },
   ];
+
+  useEffect(() => {
+    setStepDetails(replay.step_details || []);
+    setRerunStatus(replay.rerun_status || null);
+    pendingWindowKeysRef.current = new Set();
+    requestedWindowKeysRef.current = new Set();
+    setPendingWindowKeys([]);
+    setStepWindowError("");
+    setStepIdx(0);
+    setStepInput("0");
+  }, [replay]);
+
+  const requestStepWindow = useCallback(
+    async (center, radius = 16) => {
+      const safeCenter = clamp(Number(center), 0, maxStep);
+      const safeRadius = Math.max(0, Number(radius) || 0);
+      const key = windowKey(safeCenter, safeRadius);
+      if (pendingWindowKeysRef.current.has(key) || requestedWindowKeysRef.current.has(key)) {
+        return;
+      }
+
+      pendingWindowKeysRef.current.add(key);
+      requestedWindowKeysRef.current.add(key);
+      setPendingWindowKeys(Array.from(pendingWindowKeysRef.current));
+      setStepWindowError("");
+
+      try {
+        const data = await browserFetchJson(
+          `/api/runs/${encodeURIComponent(project)}/${encodeURIComponent(runName)}/replay/window`,
+          { center: safeCenter, radius: safeRadius }
+        );
+        setStepDetails((previous) => mergeStepDetails(previous, totalSteps, data?.step_details || []));
+      } catch (error) {
+        requestedWindowKeysRef.current.delete(key);
+        setStepWindowError(String(error.message || error));
+      } finally {
+        pendingWindowKeysRef.current.delete(key);
+        setPendingWindowKeys(Array.from(pendingWindowKeysRef.current));
+      }
+    },
+    [maxStep, project, runName, totalSteps]
+  );
+
+  const isStepFrameReady = useCallback(
+    (idx) => {
+      const detail = stepDetails[idx];
+      return hasStepDetail(detail);
+    },
+    [stepDetails]
+  );
+
+  useEffect(() => {
+    if (!isStepFrameReady(stepIdx)) {
+      requestStepWindow(stepIdx, 16);
+    }
+  }, [isStepFrameReady, requestStepWindow, stepIdx]);
 
   useEffect(() => {
     setStepInput(String(stepIdx));
@@ -824,13 +984,66 @@ export default function RunReplayClient({ replay, project, runName }) {
 
   useEffect(() => {
     if (!isPlaying || maxStep <= 0) {
+      lastPlaybackTickRef.current = null;
       return undefined;
     }
-    const timer = window.setTimeout(() => {
-      startTransition(() => setStepIdx((value) => (value >= maxStep ? 0 : value + 1)));
-    }, playbackMs);
-    return () => window.clearTimeout(timer);
-  }, [isPlaying, maxStep, playbackMs, startTransition, stepIdx]);
+
+    let frameId = 0;
+    function tick(now) {
+      if (lastPlaybackTickRef.current === null) {
+        lastPlaybackTickRef.current = now;
+      }
+
+      const elapsed = now - lastPlaybackTickRef.current;
+      if (elapsed >= playbackMs) {
+        const framesToAdvance = Math.max(1, Math.floor(elapsed / playbackMs));
+        lastPlaybackTickRef.current = now - (elapsed % playbackMs);
+        setStepIdx((value) => {
+          const nextStep = (value + framesToAdvance) % (maxStep + 1);
+          if (!isStepFrameReady(nextStep)) {
+            requestStepWindow(nextStep, 16);
+            return value;
+          }
+          return nextStep;
+        });
+      }
+
+      frameId = window.requestAnimationFrame(tick);
+    }
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isPlaying, isStepFrameReady, maxStep, playbackMs, requestStepWindow]);
+
+  useEffect(() => {
+    if (!isPlaying || maxStep <= 0) {
+      return undefined;
+    }
+
+    for (const offset of [12, 28, 44]) {
+      const targetStep = clamp(stepIdx + offset, 0, maxStep);
+      if (!isStepFrameReady(targetStep)) {
+        requestStepWindow(targetStep, 18);
+      }
+    }
+    return undefined;
+  }, [isPlaying, isStepFrameReady, maxStep, requestStepWindow, stepIdx]);
+
+  useEffect(() => {
+    if (!isPlaying || typeof window === "undefined") {
+      return;
+    }
+
+    for (const idx of stepWindow(clamp(stepIdx + 6, 0, maxStep), maxStep, 8)) {
+      for (const image of stepDetails[idx]?.images || []) {
+        const src = toPublicApiUrl(image.url || image.overlay_url || "");
+        if (src) {
+          const preload = new window.Image();
+          preload.src = src;
+        }
+      }
+    }
+  }, [isPlaying, maxStep, stepDetails, stepIdx]);
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -897,10 +1110,53 @@ export default function RunReplayClient({ replay, project, runName }) {
     startTransition(() => setStepIdx(clamped));
   }
 
-  async function handleDelete() {
-    await browserDelete(`/api/runs/${project}/${runName}`);
-    router.push("/runs");
-    router.refresh();
+  async function handleBuildRerun() {
+    setRerunError("");
+    setIsBuildingRerun(true);
+    try {
+      const status = await browserPostJson(
+        `/api/runs/${encodeURIComponent(project)}/${encodeURIComponent(runName)}/rerun/build`,
+        {}
+      );
+      setRerunStatus(status);
+    } catch (error) {
+      setRerunError(String(error.message || error));
+    } finally {
+      setIsBuildingRerun(false);
+    }
+  }
+
+  async function handleOpenRerun() {
+    setRerunError("");
+    setIsBuildingRerun(true);
+    const popup = window.open("about:blank", "_blank");
+    try {
+      const status = await browserPostJson(
+        `/api/runs/${encodeURIComponent(project)}/${encodeURIComponent(runName)}/rerun/open`,
+        {}
+      );
+      setRerunStatus(status);
+      if (status.server?.ready === false) {
+        throw new Error("Rerun viewer is still starting. Please try Open in Rerun again after the proxy is ready.");
+      }
+      const href = rerunViewerHref(status);
+      if (href) {
+        if (popup) {
+          popup.location.href = href;
+        } else {
+          window.location.href = href;
+        }
+      } else if (popup) {
+        popup.close();
+      }
+    } catch (error) {
+      if (popup) {
+        popup.close();
+      }
+      setRerunError(String(error.message || error));
+    } finally {
+      setIsBuildingRerun(false);
+    }
   }
 
   async function handleGenerateAttention(mode) {
@@ -929,571 +1185,307 @@ export default function RunReplayClient({ replay, project, runName }) {
     }
   }
 
-  const currentCachedSteps = new Set(attentionData?.cached_steps || []);
+  const workspaceMode =
+    activeTab === "latency" || activeTab === "action"
+      ? "analyze"
+      : activeTab;
+  const pendingCurrentFrame = pendingWindowKeys.some((key) => windowKeyCoversStep(key, stepIdx, maxStep));
+  const currentHasDetail = hasStepDetail(steps[stepIdx]);
+  const currentHasImages = Boolean(currentStep.images?.length);
+  const frameStatus = !currentHasDetail
+    ? { state: "loading", label: `Loading exact frame ${stepIdx}`, detail: "Fetching the replay window for this step." }
+    : allCameras.length && !currentHasImages && pendingCurrentFrame
+      ? { state: "loading", label: `Loading exact frame ${stepIdx}`, detail: "Waiting for camera artifacts in the requested window." }
+      : allCameras.length && !currentHasImages
+        ? { state: "missing", label: `No images recorded for step ${stepIdx}`, detail: "The step detail is loaded, but it contains no camera images." }
+        : { state: "ready", label: `Frame ${stepIdx} ready`, detail: `${currentStep.images?.length || 0} camera image(s) loaded.` };
+  const runPrompt = meta.task_prompt || summary.task_name || currentStep.prompt || "--";
+  const states = replay.states || [];
+  const firstActions = replay.first_actions || [];
+  const timingSeries = replay.timing_series || {};
+  const trajectory = {
+    title: "历史轨迹 + 预测",
+    currentPoint: currentStep.state,
+    series: [
+      {
+        name: "历史",
+        color: "#4b5563",
+        points: states.slice(0, stepIdx + 1),
+      },
+      {
+        name: "预测",
+        color: "#dc2626",
+        dashed: true,
+        points: currentStep.action_chunk,
+      },
+    ],
+  };
+  const latencyRows = nearbySteps.map((idx) => ({
+    stepIdx: idx,
+    total: totalLatency((steps[idx] || fallbackStep(replay, idx)).timing || {}),
+  }));
+  const replaySignalPanels = useMemo(() => {
+    const stateXyz = groupByKey(replay.state_groups || [], "xyz", [0, 1, 2], "XYZ");
+    const actionXyz = groupByKey(replay.action_groups || [], "xyz", [0, 1, 2], "XYZ");
+    const stateGripperIdx = labelIndex(replay.state_labels || [], ["gripper", "grip"]);
+    const actionGripperIdx = labelIndex(replay.action_labels || [], ["gripper", "grip"]);
+    const gripperSeries = [
+      stateGripperIdx >= 0
+        ? {
+          name: "state",
+          values: states.map((row) => row?.[stateGripperIdx] ?? null),
+          color: "#0f766e",
+        }
+        : null,
+      actionGripperIdx >= 0
+        ? {
+          name: "action",
+          values: firstActions.map((row) => row?.[actionGripperIdx] ?? null),
+          color: "#c2410c",
+        }
+        : null,
+    ].filter(Boolean);
 
-  return (
-    <div className="section-stack">
-      <section className="section-panel">
-        <div className="run-detail-header">
-          <div>
-            <p className="eyebrow">{summary.project}</p>
-            <h1>{summary.run_name}</h1>
-            <p className="hero-desc">{meta.task_prompt || summary.task_name || "--"}</p>
-          </div>
-          <div className="run-meta-grid">
-            <div className="run-meta-item">
-              <span className="run-meta-label">模型</span>
-              <span className="run-meta-value">{summary.model_name || "unknown"}</span>
-            </div>
-            <div className="run-meta-item">
-              <span className="run-meta-label">步数</span>
-              <span className="run-meta-value">{summary.total_steps ?? 0}</span>
-            </div>
-            {summary.inference_freq ? (
-              <div className="run-meta-item">
-                <span className="run-meta-label">频率</span>
-                <span className="run-meta-value">{summary.inference_freq} Hz</span>
-              </div>
-            ) : null}
-            {summary.action_dim ? (
-              <div className="run-meta-item">
-                <span className="run-meta-label">动作维度</span>
-                <span className="run-meta-value">{summary.action_dim}</span>
-              </div>
-            ) : null}
-            <div className="run-meta-item">
-              <span className="run-meta-label">更新</span>
-              <span className="run-meta-value">{formatDate(summary.updated_at)}</span>
-            </div>
-          </div>
+    return [
+      {
+        title: "State XYZ",
+        markerIndex: stepIdx,
+        series: seriesForGroup(states, replay.state_labels || [], stateXyz).slice(0, 3),
+      },
+      {
+        title: "Action XYZ",
+        markerIndex: stepIdx,
+        series: seriesForGroup(firstActions, replay.action_labels || [], actionXyz).slice(0, 3),
+      },
+      {
+        title: "Gripper",
+        markerIndex: stepIdx,
+        series: gripperSeries,
+      },
+      {
+        title: "Latency",
+        markerIndex: stepIdx,
+        unit: "ms",
+        series: [
+          { name: "total", values: timingSeries.total_latency_ms || [], color: "#6b7280" },
+          { name: "inference", values: timingSeries.inference_latency_ms || [], color: "#2563eb" },
+        ],
+      },
+    ].filter((panel) => panel.series?.some((item) => item.values?.some((value) => value !== null && value !== undefined)));
+  }, [
+    firstActions,
+    replay.action_groups,
+    replay.action_labels,
+    replay.state_groups,
+    replay.state_labels,
+    states,
+    stepIdx,
+    timingSeries.inference_latency_ms,
+    timingSeries.total_latency_ms,
+  ]);
+  const attentionControls = {
+    device: attentionDevice,
+    layer: attentionLayer,
+    modelPath: attentionModelPath,
+    prompt: attentionPrompt,
+    stdoutTail: attentionStdoutTail,
+    isGenerating: isGeneratingAttention,
+    onDeviceChange: setAttentionDevice,
+    onLayerChange: setAttentionLayer,
+    onModelPathChange: setAttentionModelPath,
+    onPromptChange: setAttentionPrompt,
+    onGenerateCurrent: () => handleGenerateAttention("current"),
+  };
+  const currentLatency = totalLatency(currentStep.timing || {});
+  const averageLatency = meanValue(timingSeries.total_latency_ms || []);
+  const p95Latency = replay.latency_summary?.total_latency?.p95_ms ?? null;
+  const currentLatencyRank = percentileRank(timingSeries.total_latency_ms || [], currentLatency);
+  const analysisKpis = [
+    { label: "Current total", value: formatMs(currentLatency), note: `${percentText(currentLatencyRank)} percentile` },
+    { label: "Run average", value: formatMs(averageLatency), note: `${signedNumber(Number(currentLatency || 0) - Number(averageLatency || 0), 1)} ms vs avg` },
+    { label: "P95 total", value: formatMs(p95Latency), note: "run latency tail" },
+    { label: "Action dims", value: summary.action_dim ?? replay.action_labels?.length ?? "--", note: `${summary.total_steps ?? 0} steps` },
+  ];
+  const analysisCharts =
+    globalView === "inference"
+      ? [
+        ...(replay.state_groups || []).map((group) => ({
+          key: `state-${group.key}`,
+          title: `State / ${group.title}`,
+          xLabel: "inference step",
+          series: group.indices?.length ? seriesForGroup(states, replay.state_labels, group) : [],
+        })),
+        ...(replay.action_groups || []).map((group) => ({
+          key: `action-${group.key}`,
+          title: `Action / ${group.title}`,
+          xLabel: "inference step",
+          series: group.indices?.length ? seriesForGroup(firstActions, replay.action_labels, group) : [],
+        })),
+      ]
+      : (replay.expanded_execution?.action_groups || []).map((group) => ({
+        key: `exec-${group.key}`,
+        title: `Executed action / ${group.title}`,
+        xLabel: "execution step",
+        series: group.indices?.length
+          ? seriesForGroup(
+            replay.expanded_execution.expanded_actions,
+            replay.expanded_execution.action_labels,
+            group
+          )
+          : [],
+      }));
+  const analyzeContent = (
+    <div className="run-workspace-analysis">
+      <section className="run-workspace-analysis-hero">
+        <div>
+          <p className="run-workspace-eyebrow">Analyze</p>
+          <h2>Latency and action dashboard</h2>
+          <p>{runPrompt}</p>
+        </div>
+        <div className="run-workspace-analysis-kpis">
+          {analysisKpis.map((item) => (
+            <article key={item.label}>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <p>{item.note}</p>
+            </article>
+          ))}
         </div>
       </section>
 
-      <section className="selection-panel">
-        <div className="replay-toolbar">
-          <div className="replay-row-main">
-            <div className="replay-btn-group">
-              <button type="button" className="replay-btn" onClick={() => jumpToStep(0)} title="首帧">⏮</button>
-              <button type="button" className="replay-btn" onClick={() => jumpToStep(stepIdx - 1)} title="上一帧">◀</button>
-              <button type="button" className="replay-btn replay-btn-play" onClick={() => setIsPlaying((v) => !v)}>
-                {isPlaying ? "⏸" : "▶"}
-              </button>
-              <button type="button" className="replay-btn" onClick={() => jumpToStep(stepIdx + 1)} title="下一帧">▶</button>
-              <button type="button" className="replay-btn" onClick={() => jumpToStep(maxStep)} title="末帧">⏭</button>
-            </div>
-            <input
-              type="range"
-              className="replay-slider"
-              min="0"
-              max={maxStep}
-              value={stepIdx}
-              onChange={(event) => jumpToStep(event.target.value)}
-            />
-            <span className="replay-readout">{stepIdx} / {maxStep}</span>
-          </div>
-          <div className="replay-row-options">
-            <label className="replay-option">
-              <span>跳转</span>
-              <input
-                type="number"
-                min="0"
-                max={maxStep}
-                value={stepInput}
-                onChange={(event) => setStepInput(event.target.value)}
-                onBlur={() => jumpToStep(stepInput)}
-              />
-            </label>
-            <label className="replay-option">
-              <span>速度</span>
-              <select value={playbackMs} onChange={(event) => setPlaybackMs(Number(event.target.value))}>
-                {playbackOptions.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
-            </label>
-            <span className="muted replay-hint">快捷键: ← → 切帧 · 空格播放</span>
-          </div>
-        </div>
-        <StepFilmstrip
-          steps={steps}
-          nearbySteps={nearbySteps}
-          currentStepIdx={stepIdx}
-          onSelect={jumpToStep}
-          cameras={allCameras}
-          filmstripCamera={filmstripCamera || allCameras[0] || ""}
-          onCameraChange={setFilmstripCamera}
-        />
-        <SimpleTabs
-          activeTab={activeTab}
-          onChange={setActiveTab}
-          tabs={[
-            { key: "replay", label: "逐帧回放" },
-            { key: "attention", label: "Attention" },
-            { key: "latency", label: "时延分析" },
-            { key: "action", label: "动作分析" },
-            { key: "model", label: "模型配置" },
+      <div className="run-workspace-analysis-tabs">
+        <button
+          type="button"
+          className={`run-workspace-mode-button${globalView === "inference" ? " run-workspace-mode-button-active" : ""}`}
+          onClick={() => setGlobalView("inference")}
+        >
+          Inference
+        </button>
+        <button
+          type="button"
+          className={`run-workspace-mode-button${globalView === "execution" ? " run-workspace-mode-button-active" : ""}`}
+          onClick={() => setGlobalView("execution")}
+        >
+          Execution
+        </button>
+      </div>
+
+      <div className="run-workspace-analysis-grid run-workspace-analysis-grid-top">
+        <LineChart
+          title="Latency timeline"
+          markerIndex={stepIdx}
+          xLabel="step"
+          series={[
+            { name: "transport", values: timingSeries.transport_latency_ms || [], color: "#d97706" },
+            { name: "inference", values: timingSeries.inference_latency_ms || [], color: "#2563eb" },
+            { name: "total", values: timingSeries.total_latency_ms || [], color: "#6b7280" },
+            { name: "message", values: timingSeries.message_interval_ms || [], color: "#0f766e" },
           ]}
         />
-      </section>
+        <HistogramChart title="Total latency distribution" values={timingSeries.total_latency_ms || []} color="#475569" />
+      </div>
 
-      {activeTab === "replay" ? (
-        <>
-          <section className="section-panel">
-            <StepImages
-              images={currentStep.images || []}
-              selectedCamera={selectedCamera}
-              onCameraChange={setSelectedCamera}
-              title="视觉观测"
+      <div className="run-workspace-chart-grid">
+        {analysisCharts.map((chart) =>
+          chart.series?.length ? (
+            <LineChart
+              key={chart.key}
+              title={chart.title}
+              markerIndex={globalView === "execution" ? currentBoundary.start : stepIdx}
+              xLabel={chart.xLabel}
+              series={chart.series}
             />
-          </section>
+          ) : null
+        )}
+      </div>
+    </div>
+  );
 
-          <section className="detail-grid">
-            <div className="section-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">规划</p>
-                  <h2>3D 动作轨迹</h2>
-                </div>
-              </div>
-              <TrajectoryProjection
-                title="历史轨迹 + 预测"
-                currentPoint={currentStep.state}
-                series={[
-                  {
-                    name: "历史",
-                    color: "#4b5563",
-                    points: replay.states.slice(0, stepIdx + 1),
-                  },
-                  {
-                    name: "预测",
-                    color: "#dc2626",
-                    dashed: true,
-                    points: currentStep.action_chunk,
-                  },
-                ]}
-              />
-              <section className="detail-grid" style={{ marginTop: "16px" }}>
-                <VectorTable title="当前状态" labels={replay.state_labels} values={currentStep.state || []} />
-                <VectorTable title="首个执行动作" labels={replay.action_labels} values={currentStep.action_preview || []} />
-              </section>
-            </div>
+  return (
+    <div className="run-workspace-shell">
+      <header className="run-workspace-header">
+        <div className="run-workspace-header-main">
+          <p className="run-workspace-eyebrow">{summary.project}</p>
+          <h1>{summary.run_name}</h1>
+          <p>{runPrompt}</p>
+        </div>
+        <div className="run-workspace-header-metrics">
+          <span><strong>{summary.model_name || "unknown"}</strong> model</span>
+          <span><strong>{summary.total_steps ?? 0}</strong> steps</span>
+          {summary.inference_freq ? <span><strong>{summary.inference_freq}</strong> Hz</span> : null}
+          {summary.action_dim ? <span><strong>{summary.action_dim}</strong> actions</span> : null}
+          <span><strong>{formatDate(summary.updated_at)}</strong> updated</span>
+        </div>
+        <div className="run-workspace-header-actions">
+          <button type="button" className="run-workspace-button" disabled={isBuildingRerun} onClick={handleOpenRerun}>
+            {isBuildingRerun ? "Opening" : rerunStatus?.available && !rerunStatus?.stale ? "Open in Rerun" : "Build + Open Rerun"}
+          </button>
+          <button type="button" className="run-workspace-button run-workspace-button-secondary" disabled={isBuildingRerun} onClick={handleBuildRerun}>
+            Rebuild .rrd
+          </button>
+        </div>
+        {rerunError || stepWindowError || attentionError ? (
+          <p className="run-workspace-error">{rerunError || stepWindowError || attentionError}</p>
+        ) : null}
+      </header>
 
-            <ActionWindowPanel
-              currentStep={currentStep}
-              currentBoundary={currentBoundary}
-              currentExecution={currentExecution}
-              actionLabels={replay.action_labels || []}
-            />
-          </section>
+      <div className="run-workspace-grid">
+        <RunWorkspaceRail
+          mode={workspaceMode}
+          onModeChange={setActiveTab}
+          collapsed={railCollapsed}
+          onToggleCollapsed={() => setRailCollapsed((value) => !value)}
+          summary={summary}
+          currentStep={currentStep}
+          stepIdx={stepIdx}
+          maxStep={maxStep}
+          frameStatus={frameStatus}
+          allCameras={allCameras}
+          selectedCamera={selectedCamera}
+          onCameraChange={setSelectedCamera}
+          rerunStatus={rerunStatus}
+        />
 
-          <section className="section-panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">全局趋势</p>
-                <h2>状态与动作时序曲线</h2>
-              </div>
-            </div>
-            <SimpleTabs
-              activeTab={globalView}
-              onChange={setGlobalView}
-              tabs={[
-                { key: "inference", label: "推理步视图" },
-                { key: "execution", label: "执行步视图" },
-              ]}
-            />
+        <RunWorkspaceViewer
+          mode={workspaceMode}
+          currentStep={currentStep}
+          selectedCamera={selectedCamera}
+          onCameraChange={setSelectedCamera}
+          allCameras={allCameras}
+          stepIdx={stepIdx}
+          maxStep={maxStep}
+          isPlaying={isPlaying}
+          playbackMs={playbackMs}
+          playbackOptions={playbackOptions}
+          stepInput={stepInput}
+          onStepChange={jumpToStep}
+          onPlayToggle={() => setIsPlaying((value) => !value)}
+          onPlaybackMsChange={setPlaybackMs}
+          onStepInputChange={setStepInput}
+          onStepInputCommit={jumpToStep}
+          frameStatus={frameStatus}
+          attentionData={attentionData}
+          attentionLoading={isLoadingAttention || isGeneratingAttention}
+          attentionControls={attentionControls}
+          trajectory={trajectory}
+          signalPanels={replaySignalPanels}
+          showTrajectory={false}
+        >
+          {analyzeContent}
+        </RunWorkspaceViewer>
 
-            {globalView === "inference" ? (
-              <div className="section-stack">
-                {replay.state_groups?.map((group) =>
-                  group.indices?.length ? (
-                    <LineChart
-                      key={`state-${group.key}`}
-                      title={`状态｜${group.title}`}
-                      markerIndex={stepIdx}
-                      xLabel="X 轴: 推理调用次数"
-                      series={seriesForGroup(replay.states, replay.state_labels, group)}
-                    />
-                  ) : null
-                )}
-                {replay.action_groups?.map((group) =>
-                  group.indices?.length ? (
-                    <LineChart
-                      key={`action-${group.key}`}
-                      title={`动作｜${group.title}`}
-                      markerIndex={stepIdx}
-                      xLabel="X 轴: 推理调用次数"
-                      series={seriesForGroup(replay.first_actions, replay.action_labels, group)}
-                    />
-                  ) : null
-                )}
-              </div>
-            ) : (
-              <div className="section-stack">
-                {replay.expanded_execution?.action_groups?.map((group) =>
-                  group.indices?.length ? (
-                    <LineChart
-                      key={`exec-${group.key}`}
-                      title={`执行动作｜${group.title}`}
-                      markerIndex={currentBoundary.start}
-                      xLabel="X 轴: 全局执行步"
-                      series={seriesForGroup(
-                        replay.expanded_execution.expanded_actions,
-                        replay.expanded_execution.action_labels,
-                        group
-                      )}
-                    />
-                  ) : null
-                )}
-              </div>
-            )}
-            <RawJson value={currentStep.raw_step} />
-          </section>
-        </>
-      ) : null}
-
-      {activeTab === "attention" ? (
-        <section className="section-stack">
-          <section className="selection-panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">注意力</p>
-                <h2>缓存浏览与离线生成</h2>
-              </div>
-            </div>
-            <div className="control-grid">
-              <label>
-                <span>设备</span>
-                <input value={attentionDevice} onChange={(event) => setAttentionDevice(event.target.value)} placeholder="cuda:0" />
-              </label>
-              <label>
-                <span>层索引</span>
-                <input type="number" value={attentionLayer} onChange={(event) => setAttentionLayer(Number(event.target.value))} />
-              </label>
-              <label>
-                <span>覆盖模型路径</span>
-                <input
-                  value={attentionModelPath}
-                  onChange={(event) => setAttentionModelPath(event.target.value)}
-                  placeholder="可选：覆盖模型路径"
-                />
-              </label>
-              <label>
-                <span>覆盖提示词</span>
-                <input
-                  value={attentionPrompt}
-                  onChange={(event) => setAttentionPrompt(event.target.value)}
-                  placeholder="可选：覆盖提示词"
-                />
-              </label>
-            </div>
-            <div className="selection-actions">
-              <button type="button" disabled={isGeneratingAttention} onClick={() => handleGenerateAttention("current")}>
-                {isGeneratingAttention ? "生成中..." : "生成当前 Step"}
-              </button>
-              <button type="button" disabled={isGeneratingAttention} onClick={() => handleGenerateAttention("window")}>
-                {isGeneratingAttention ? "请稍候" : "生成附近 5 步"}
-              </button>
-              <button type="button" className="secondary-button" onClick={() => setAttentionReloadKey((value) => value + 1)}>
-                刷新当前状态
-              </button>
-              <span className="muted">
-                已发现缓存: {(replay.attention_caches || []).map((item) => item.name).join(", ") || "无"} | 快捷键: 左右切帧, 空格播放
-              </span>
-            </div>
-            {attentionError ? <div className="placeholder-note">{attentionError}</div> : null}
-          </section>
-
-          <section className="detail-grid">
-            <div className="section-stack">
-              <StepImages
-                images={currentStep.images || []}
-                selectedCamera={selectedCamera}
-                onCameraChange={setSelectedCamera}
-                title="当前观测图像"
-              />
-              <div className="section-panel">
-                <div className="section-heading">
-                  <div>
-              <p className="eyebrow">缓存窗口</p>
-                  <h2>附近步缓存状态</h2>
-                  </div>
-                </div>
-                <div className="step-strip">
-                  {nearbySteps.map((idx) => (
-                    <button
-                      key={`attn-${idx}`}
-                      type="button"
-                      className={`step-token${idx === stepIdx ? " is-active" : ""}${currentCachedSteps.has(idx) ? " is-cached" : ""}`}
-                      onClick={() => jumpToStep(idx)}
-                    >
-                      <strong>{idx}</strong>
-                      <span>{currentCachedSteps.has(idx) ? "已缓存" : "未缓存"}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="section-stack">
-              <div className="timing-grid">
-                <div className="kpi-card">
-                  <span className="stat-label">当前 Step</span>
-                  <strong>{stepIdx}</strong>
-                </div>
-                <div className="kpi-card">
-                  <span className="stat-label">当前缓存</span>
-                  <strong>{attentionData?.current_cached ? "是" : "否"}</strong>
-                </div>
-                <div className="kpi-card">
-                  <span className="stat-label">已缓存 Step</span>
-                  <strong>{attentionData?.cached_step_count ?? 0}</strong>
-                </div>
-                <div className="kpi-card">
-                  <span className="stat-label">输出目录</span>
-                  <PathText value={attentionData?.output_dir || "--"} compact />
-                </div>
-                <div className="kpi-card">
-                  <span className="stat-label">状态</span>
-                  <strong>{isGeneratingAttention ? "正在生成" : isLoadingAttention ? "读取缓存" : "就绪"}</strong>
-                </div>
-              </div>
-              <div className="meta-panel">
-                <div>
-                  <span className="stat-label">Attention Backend</span>
-                  <p>{attentionData?.backend_name || "--"}</p>
-                </div>
-                <div>
-                  <span className="stat-label">实际模型路径</span>
-                  <PathText value={attentionData?.model_path || meta.model_path || "--"} />
-                </div>
-                <div>
-                  <span className="stat-label">实际提示词</span>
-                  <p>{attentionData?.prompt || currentStep.prompt || meta.task_prompt || "--"}</p>
-                </div>
-                {attentionStdoutTail ? (
-                  <div>
-                    <span className="stat-label">生成日志</span>
-                    <pre>{attentionStdoutTail}</pre>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </section>
-
-          <section className="section-panel">
-            <div className="section-heading">
-              <div>
-              <p className="eyebrow">Attention 叠加</p>
-              <h2>原图 / Overlay 对照</h2>
-              </div>
-            </div>
-            <AttentionCompareGrid sourceImages={currentStep.images || []} overlays={attentionData?.overlays || []} />
-          </section>
-        </section>
-      ) : null}
-
-      {activeTab === "latency" ? (
-        <section className="section-stack">
-          <FrameDiagnosisPanel
-            currentStep={currentStep}
-            stepIdx={stepIdx}
-            nearbyLatencyRows={nearbySteps.map((idx) => ({
-              stepIdx: idx,
-              total: totalLatency(steps[idx]?.timing || {}),
-            }))}
-            latencySummary={replay.latency_summary || {}}
-            meta={meta}
-            onSelectStep={jumpToStep}
-          />
-          <LineChart
-            title="传输 / 推理 / 总延迟趋势"
-            markerIndex={stepIdx}
-            xLabel="推理步"
-            series={[
-              { name: "传输", values: replay.timing_series.transport_latency_ms, color: "#d97706" },
-              { name: "推理", values: replay.timing_series.inference_latency_ms, color: "#2563eb" },
-              { name: "总计", values: replay.timing_series.total_latency_ms, color: "#6b7280" },
-              { name: "消息间隔", values: replay.timing_series.message_interval_ms, color: "#0f766e" },
-            ]}
-          />
-          <section className="detail-grid">
-            <div className="timing-grid">
-              {Object.entries(replay.latency_summary || {}).map(([key, value]) => {
-                const labelMap = {
-                  transport_latency: "传输延迟",
-                  inference_latency: "推理延迟",
-                  total_latency: "总延迟",
-                  message_interval: "消息间隔",
-                };
-                return (
-                  <div key={key} className="kpi-card">
-                    <span className="stat-label">{labelMap[key] || key}</span>
-                    <strong>{formatMs(value?.avg_ms)}</strong>
-                    <span className="muted">
-                      P95 {formatMs(value?.p95_ms)} · 最大 {formatMs(value?.max_ms)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            <HistogramChart title="总延迟分布直方图" values={replay.timing_series.total_latency_ms} color="#475569" />
-          </section>
-        </section>
-      ) : null}
-
-      {activeTab === "action" ? (
-        <section className="section-stack">
-          <section className="detail-grid">
-            <div className="section-stack">
-              <LineChart
-                title="末端位置随时间变化"
-                markerIndex={stepIdx}
-                xLabel="推理步"
-                series={[
-                  { name: "x", values: replay.first_actions.map((row) => row?.[0] ?? null), color: "#0f766e" },
-                  { name: "y", values: replay.first_actions.map((row) => row?.[1] ?? null), color: "#c2410c" },
-                  { name: "z", values: replay.first_actions.map((row) => row?.[2] ?? null), color: "#2563eb" },
-                ]}
-              />
-              <LineChart
-                title="动作幅度"
-                markerIndex={stepIdx}
-                xLabel="推理步"
-                series={[{ name: "幅度", values: positionMagnitude(replay.first_actions), color: "#7c3aed" }]}
-              />
-            </div>
-            <div className="section-stack">
-              {replay.action_labels?.includes("gripper") ? (
-                <LineChart
-                  title="夹爪开合随时间变化"
-                  markerIndex={stepIdx}
-                  xLabel="推理步"
-                  series={[
-                    {
-                      name: "夹爪",
-                      values: replay.first_actions.map((row) => row?.[replay.action_labels.indexOf("gripper")] ?? null),
-                      color: "#16a34a",
-                    },
-                  ]}
-                />
-              ) : null}
-              <ValueBarList
-                title="当前帧首动作"
-                labels={replay.action_labels}
-                values={currentStep.action_preview || []}
-              />
-            </div>
-          </section>
-          <section className="section-panel">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">统计</p>
-                <h2>动作维度统计</h2>
-              </div>
-            </div>
-            <div className="table-shell">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>维度</th>
-                    <th>均值</th>
-                    <th>标准差</th>
-                    <th>最小值</th>
-                    <th>最大值</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(replay.action_stats || []).map((item) => (
-                    <tr key={item.label}>
-                      <td>{item.label}</td>
-                      <td>{formatNumber(item.mean, 4)}</td>
-                      <td>{formatNumber(item.std, 4)}</td>
-                      <td>{formatNumber(item.min, 4)}</td>
-                      <td>{formatNumber(item.max, 4)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </section>
-      ) : null}
-
-      {activeTab === "model" ? (
-        <section className="detail-grid">
-          <div className="section-stack">
-            <div className="section-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">配置</p>
-                  <h2>部署与模型配置</h2>
-                </div>
-              </div>
-              <div className="timing-grid">
-                <div className="kpi-card">
-                  <span className="stat-label">模型类型</span>
-                  <strong>{meta.model_type || "未知"}</strong>
-                </div>
-                <div className="kpi-card">
-                  <span className="stat-label">动作维度</span>
-                  <strong>{summary.action_dim ?? "--"}</strong>
-                </div>
-                <div className="kpi-card">
-                  <span className="stat-label">动作步长</span>
-                  <strong>{summary.action_horizon ?? "--"}</strong>
-                </div>
-                <div className="kpi-card">
-                  <span className="stat-label">机器人</span>
-                  <strong>{meta.robot_type || summary.robot_name || "未知"}</strong>
-                </div>
-              </div>
-              <div className="meta-panel">
-                <div>
-                  <span className="stat-label">模型路径</span>
-                  <PathText value={meta.model_path || "--"} />
-                </div>
-                <div>
-                  <span className="stat-label">任务提示词</span>
-                  <p>{meta.task_prompt || "--"}</p>
-                </div>
-                <div>
-                  <span className="stat-label">摄像头</span>
-                  <p>{(replay.camera_names || []).join(", ") || "--"}</p>
-                </div>
-              </div>
-            </div>
-            <RawJson value={meta} />
-          </div>
-          <div className="section-stack">
-            <div className="section-panel danger-panel">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">危险操作</p>
-                  <h2>删除运行</h2>
-                </div>
-              </div>
-              {!deleteArmed ? (
-                <button type="button" className="danger-button" onClick={() => setDeleteArmed(true)}>
-                  删除此 run
-                </button>
-              ) : (
-                <div className="selection-actions">
-                  <button type="button" className="danger-button" onClick={handleDelete}>
-                    确认删除
-                  </button>
-                  <button type="button" className="button-ghost secondary-button" onClick={() => setDeleteArmed(false)}>
-                    取消
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="meta-panel">
-              <span className="stat-label">播放状态</span>
-              <p>{isPending ? "正在切换帧..." : isPlaying ? "自动播放中" : "就绪"}</p>
-            </div>
-          </div>
-        </section>
-      ) : null}
+        <RunWorkspaceInspector
+          mode={workspaceMode}
+          summary={summary}
+          meta={meta}
+          replay={replay}
+          currentStep={currentStep}
+          stepIdx={stepIdx}
+          currentBoundary={currentBoundary}
+          currentExecution={currentExecution}
+          latencySummary={replay.latency_summary || {}}
+        />
+      </div>
     </div>
   );
 }

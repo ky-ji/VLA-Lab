@@ -46,3 +46,58 @@ def test_resolve_launch_port_aborts_when_no_ports_available(monkeypatch):
         return
 
     raise AssertionError("expected click.Abort when no free ports are available")
+
+
+
+def _make_cli_run(tmp_path):
+    import json
+
+    run_dir = tmp_path / "project" / "run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "run_name": "run",
+                "start_time": "2026-03-06T19:53:31",
+                "model_name": "groot",
+                "task_name": "Stack bowls",
+                "robot_name": "franka",
+                "total_steps": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "steps.jsonl").write_text(
+        json.dumps(
+            {
+                "step_idx": 0,
+                "obs": {"state": [1.0, 2.0, 3.0], "images": []},
+                "action": {"values": [[0.1, 0.2, 0.3]]},
+                "timing": {"inference_latency_ms": 12.0},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return run_dir
+
+
+def test_index_build_command_creates_sidecar(tmp_path):
+    from click.testing import CliRunner
+
+    run_dir = _make_cli_run(tmp_path)
+    result = CliRunner().invoke(cli.main, ["index", "build", str(run_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert "available" in result.output
+    assert (run_dir / "artifacts" / "vlalab_index" / "manifest.json").exists()
+
+
+def test_rerun_status_command_reports_recording_path(tmp_path):
+    from click.testing import CliRunner
+
+    run_dir = _make_cli_run(tmp_path)
+    result = CliRunner().invoke(cli.main, ["rerun", "status", str(run_dir)])
+
+    assert result.exit_code == 0, result.output
+    assert "recording.rrd" in result.output

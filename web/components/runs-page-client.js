@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 
 import RunTable from "@/components/run-table";
 import { browserFetchJson } from "@/lib/api";
@@ -62,9 +61,6 @@ export default function RunsPageClient() {
             <p className="eyebrow">Runs</p>
             <h2>运行记录</h2>
           </div>
-          <Link href="/latency" className="text-link">
-            去做时延对比 →
-          </Link>
         </div>
         <div className="metric-grid">
           <div className="metric-card">

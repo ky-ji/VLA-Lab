@@ -99,6 +99,8 @@ dmypy.json
 
 # Project specific
 runs/
+!web/app/runs/
+!web/app/runs/**
 example_runs/
 *.log
 *.jsonl

@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![PyPI version](https://img.shields.io/badge/pypi-v0.1.2-orange.svg)](https://pypi.org/project/vlalab/)
 
-**Log · Replay · Analyze · Evaluate** — All-in-one toolkit for real-world VLA deployment
+**Evaluate · Replay · Inspect Data** — All-in-one toolkit for real-world VLA deployment debugging
 
 [🚀 Quick Start](#-quick-start) · [📸 Screenshots](#-screenshots) · [🎯 Features](#-features) · [🔧 Installation](#-installation)
 
@@ -25,7 +25,7 @@ Deploying VLA models to real robots is **hard**. You face:
 - 📊 **Fragmented logging** — Every framework logs differently, making cross-model comparison painful
 - 🔄 **Tedious debugging** — Replaying failures requires manual log parsing and visualization
 
-**VLA-Lab solves this.** A unified logging format + interactive visualization dashboard covering the full workflow from data collection to open-loop evaluation.
+**VLA-Lab solves this.** A unified logging format + interactive visualization dashboard covering the debugging loop from open-loop evaluation to real-robot replay and dataset inspection.
 
 ---
 
@@ -35,20 +35,20 @@ Deploying VLA models to real robots is **hard**. You face:
 <tr>
 <td width="50%">
 
-### 🔬 Inference Replay
-Step-by-step playback of policy inference: multi-camera views, 3D end-effector trajectories, full-dimensional state/action curves — pinpoint deployment failures instantly.
+### 🎯 Open-Loop Eval
+Start offline: compare predicted actions against ground truth before touching the robot. Inspect MSE / MAE summaries, temporal alignment, error heatmaps, and 3D trajectory overlays.
 
-### 📊 Dataset Viewer
-Interactively browse Zarr-format training data: frame-by-frame analysis, global statistics overview, and workspace distribution heatmaps.
+### 🔬 Real-Robot Runs
+Replay deployment logs step-by-step: multi-camera observations, state/action curves, action chunks, latency breakdowns, attention overlays, and Rerun-compatible recordings.
 
 </td>
 <td width="50%">
 
-### 📈 Latency Analysis
-Decompose transport delay, GPU inference latency, and end-to-end loop time. Time-series plots + statistical distributions + multi-run comparison to identify bottlenecks fast.
+### 📊 Dataset Viewer
+Inspect LeRobot / GR00T / Zarr datasets frame-by-frame with video playback, state/action/gripper curves, sampled frames, and workspace distributions.
 
-### 🎯 Open-Loop Eval
-Compare predicted actions against ground truth: MSE / MAE metric summaries, temporal alignment, error heatmaps, and 3D trajectory overlay.
+### 🧭 OOD Diagnosis
+When real-world success stays low, compare deployment observations against the dataset to catch out-of-distribution lighting, camera framing, object placement, or task-state mismatches.
 
 </td>
 </tr>
@@ -68,62 +68,39 @@ Compare predicted actions against ground truth: MSE / MAE metric summaries, temp
 
 ---
 
+## 🧭 Recommended Debugging Workflow
+
+1. **Run open-loop evaluation first.** If predicted actions do not match ground truth offline, fix the checkpoint, action normalization, horizon, or model inputs before running the robot.
+2. **Then inspect real-robot Runs.** Check whether camera observations, model paths, prompts, states, action chunks, timing, and attention maps look sane during deployment.
+3. **Finally inspect the dataset for OOD cases.** If open-loop eval and real-robot wiring both look healthy but success remains low, compare the run observations against training episodes. The failure may come from lighting, camera placement, object configuration, or states that were absent from the dataset.
+
+---
+
 ## 📸 Screenshots
 
 <table>
 <tr>
+<td align="center" width="50%">
+
+#### 1. 🎯 Open-Loop Evaluation
+<img src="assets/openloop_eval.png" width="100%"/>
+<sub>Default eval folders · GT vs Pred curves · trajectory metrics</sub>
+
+</td>
+<td align="center" width="50%">
+
+#### 2. 🔬 Real-Robot Run Replay
+<img src="assets/replay.png" width="100%"/>
+<sub>Multi-camera observations · state/action curves · action chunks · Rerun export</sub>
+
+</td>
+</tr>
+<tr>
 <td colspan="2" align="center">
 
-#### 🚀 Get Started — Feature Overview
-<img src="assets/intro.png" width="100%"/>
-
-</td>
-</tr>
-<tr>
-<td align="center" width="50%">
-
-#### 🔬 Inference Replay
-<img src="assets/replay.png" width="100%"/>
-<sub>Multi-camera views · 3D end-effector trajectory · Full state/action curves</sub>
-
-</td>
-<td align="center" width="50%">
-
-#### 📈 Latency Analysis
-<img src="assets/delay_analysis.png" width="100%"/>
-<sub>Transport & inference latency time-series · Statistical distributions · Multi-run comparison</sub>
-
-</td>
-</tr>
-<tr>
-<td align="center" width="50%">
-
-#### 📊 Dataset Frame-by-Frame Analysis
+#### 3. 📊 Dataset / OOD Inspection
 <img src="assets/dataset_view.png" width="100%"/>
-<sub>Camera views · Robot state · Timeline scrubbing</sub>
-
-</td>
-<td align="center" width="50%">
-
-#### 📊 Dataset Global Overview
-<img src="assets/dataset_global.png" width="100%"/>
-<sub>Episode statistics · Action distributions · Image grid</sub>
-
-</td>
-</tr>
-<tr>
-<td align="center" width="50%">
-
-#### 📊 Workspace Distribution
-<img src="assets/dataset_space.png" width="100%"/>
-<sub>3D workspace sampling density visualization</sub>
-
-</td>
-<td align="center" width="50%">
-
-#### 🎯 Open-Loop Evaluation
-<img src="assets/openloop_eval.png" width="100%"/>
-<sub>MSE/MAE summary · Temporal comparison · Error heatmap · 3D trajectories</sub>
+<sub>Default dataset folders · video playback · state/action/gripper curves · workspace checks</sub>
 
 </td>
 </tr>
@@ -246,7 +223,6 @@ The web UI covers the main workflows:
 
 - deploy dashboard
 - overview / run list / run detail
-- latency comparison
 - dataset viewer
 - open-loop eval viewer
 

@@ -62,7 +62,7 @@ export default function HomePageClient() {
           <p className="eyebrow">VLA-Lab Workspace</p>
           <h1>VLA 部署<br />运维工作台</h1>
           <p className="hero-desc">
-            统一管理推理日志、时延分析、数据集浏览与开环评估，减少排查成本。
+            统一管理推理日志、数据集浏览与开环评估，减少排查成本。
           </p>
           <div className="hero-actions">
             <Link href="/deploy" className="button-link">
@@ -71,8 +71,8 @@ export default function HomePageClient() {
             <Link href="/runs" className="button-link">
               浏览 Runs
             </Link>
-            <Link href="/latency" className="button-ghost">
-              时延分析
+            <Link href="/datasets" className="button-ghost">
+              数据集浏览
             </Link>
           </div>
         </div>
@@ -160,11 +160,7 @@ export default function HomePageClient() {
           </Link>
           <Link href="/runs" className="feature-card feature-card-link">
             <h3>推理日志</h3>
-            <p>浏览项目和 run 列表，逐帧回放、轨迹分析与 attention 可视化。</p>
-          </Link>
-          <Link href="/latency" className="feature-card feature-card-link">
-            <h3>时延对比</h3>
-            <p>多 run transport / inference / total 延迟对比与分布分析。</p>
+            <p>浏览项目和 run 列表，逐帧回放、轨迹、时延与 attention 可视化。</p>
           </Link>
           <Link href="/datasets" className="feature-card feature-card-link">
             <h3>数据集浏览</h3>

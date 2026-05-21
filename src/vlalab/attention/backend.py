@@ -59,12 +59,32 @@ def _load_backend_from_spec(spec: str) -> ModuleType:
         ) from exc
 
 
+def _iter_backend_specs_from_base(base: Path) -> Iterable[str]:
+    try:
+        resolved = base.expanduser().resolve()
+    except Exception:
+        resolved = base.expanduser()
+
+    seen = set()
+    for parent in (resolved, *resolved.parents):
+        for candidate in (
+            parent / "realworld_deploy" / "offline_attention" / "backend.py",
+            parent / "Isaac-GR00T" / "realworld_deploy" / "offline_attention" / "backend.py",
+        ):
+            candidate_key = str(candidate)
+            if candidate_key in seen:
+                continue
+            seen.add(candidate_key)
+            if candidate.exists():
+                yield str(candidate)
+
+
 def _iter_default_backend_specs() -> Iterable[str]:
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        candidate = parent / "Isaac-GR00T" / "realworld_deploy" / "offline_attention" / "backend.py"
-        if candidate.exists():
-            yield str(candidate)
+    runs_dir = os.getenv("VLALAB_DIR", "").strip()
+    if runs_dir:
+        yield from _iter_backend_specs_from_base(Path(runs_dir))
+
+    yield from _iter_backend_specs_from_base(Path(__file__).resolve())
 
 
 def _discover_backend_spec() -> str:
