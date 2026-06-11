@@ -38,7 +38,7 @@ Advanced API:
     logger.close()
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 # Simple API
 from vlalab.core import (
